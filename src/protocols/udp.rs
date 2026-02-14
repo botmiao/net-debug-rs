@@ -2,10 +2,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::{
-    net::UdpSocket,
-    sync::{mpsc::{Receiver, Sender, channel}, RwLock},
-};
+use tokio::net::UdpSocket;
+use tokio::sync::{mpsc::{Receiver, Sender, channel}, RwLock};
 
 use crate::protocols::common::{
     ConnectionInfo, Message, MessageDirection, MessageType, ProtocolHandler,
@@ -50,22 +48,23 @@ impl UdpServerHandler {
 #[async_trait]
 impl ProtocolHandler for UdpServerHandler {
     async fn start(&mut self) -> Result<()> {
-        todo!("Implement UDP server start")
+        anyhow::bail!("UDP server handler not yet fully implemented")
     }
     
     async fn stop(&mut self) -> Result<()> {
-        todo!("Implement UDP server stop")
+        self.running = false;
+        Ok(())
     }
     
-    async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
-        todo!("Implement UDP server send message")
+    async fn send_message(&mut self, _message: MessageType, _target: Option<String>) -> Result<()> {
+        anyhow::bail!("UDP server send not yet implemented")
     }
     
-    fn get_receiver(&self) -> Option<Receiver<Message>> {
-        self.message_rx.clone()
+    fn get_ui_to_server_sender(&self) -> Option<Sender<Message>> {
+        self.message_tx.clone()
     }
     
-    fn set_ui_sender(&mut self, sender: Sender<Message>) {
+    fn set_server_to_ui_sender(&mut self, sender: Sender<Message>) {
         self.ui_tx = Some(sender);
     }
     
@@ -74,7 +73,7 @@ impl ProtocolHandler for UdpServerHandler {
     }
     
     fn get_connections(&self) -> Vec<ConnectionInfo> {
-        todo!("Implement get_connections for UDP server")
+        vec![]
     }
     
     fn protocol_name(&self) -> &'static str {
@@ -121,22 +120,23 @@ impl UdpClientHandler {
 #[async_trait]
 impl ProtocolHandler for UdpClientHandler {
     async fn start(&mut self) -> Result<()> {
-        todo!("Implement UDP client start")
+        anyhow::bail!("UDP client handler not yet fully implemented")
     }
     
     async fn stop(&mut self) -> Result<()> {
-        todo!("Implement UDP client stop")
+        self.running = false;
+        Ok(())
     }
     
-    async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
-        todo!("Implement UDP client send message")
+    async fn send_message(&mut self, _message: MessageType, _target: Option<String>) -> Result<()> {
+        anyhow::bail!("UDP client send not yet implemented")
     }
     
-    fn get_receiver(&self) -> Option<Receiver<Message>> {
-        self.message_rx.clone()
+    fn get_ui_to_server_sender(&self) -> Option<Sender<Message>> {
+        self.message_tx.clone()
     }
     
-    fn set_ui_sender(&mut self, sender: Sender<Message>) {
+    fn set_server_to_ui_sender(&mut self, sender: Sender<Message>) {
         self.ui_tx = Some(sender);
     }
     
@@ -145,7 +145,7 @@ impl ProtocolHandler for UdpClientHandler {
     }
     
     fn get_connections(&self) -> Vec<ConnectionInfo> {
-        todo!("Implement get_connections for UDP client")
+        vec![]
     }
     
     fn protocol_name(&self) -> &'static str {

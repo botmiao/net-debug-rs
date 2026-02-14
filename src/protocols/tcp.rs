@@ -13,6 +13,36 @@ use tokio::{
 
 use crate::protocols::common::{ConnectionInfo, Message, MessageDirection, MessageType, ProtocolHandler};
 
+// 简单的十六进制解码辅助函数
+fn hex_decode(hex_str: &str) -> Option<Vec<u8>> {
+    let hex_str = hex_str.trim();
+    if hex_str.is_empty() {
+        return Some(Vec::new());
+    }
+    
+    // 移除可能的 0x 前缀
+    let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+    let hex_str = hex_str.strip_prefix("0X").unwrap_or(hex_str);
+    
+    // 移除所有空白字符
+    let hex_str: String = hex_str.chars().filter(|c| !c.is_whitespace()).collect();
+    
+    if hex_str.len() % 2 != 0 {
+        return None;
+    }
+    
+    let mut result = Vec::with_capacity(hex_str.len() / 2);
+    for i in (0..hex_str.len()).step_by(2) {
+        let byte_str = &hex_str[i..i + 2];
+        match u8::from_str_radix(byte_str, 16) {
+            Ok(byte) => result.push(byte),
+            Err(_) => return None,
+        }
+    }
+    
+    Some(result)
+}
+
 /// TCP 服务器处理器
 pub struct TcpServerHandler {
     /// 本地地址
@@ -219,7 +249,32 @@ impl ProtocolHandler for TcpServerHandler {
     }
 
     async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
-        todo!("Implement TCP server send message")
+        let data = match message {
+            MessageType::Text(text) => Bytes::from(text.into_bytes()),
+            MessageType::Binary(bytes) => bytes,
+            MessageType::Hex(hex_str) => {
+                // 将十六进制字符串转换为字节
+                let bytes = hex_decode(&hex_str).unwrap_or_default();
+                Bytes::from(bytes)
+            }
+            _ => return Ok(()), // 不支持发送其他类型的消息
+        };
+
+        if let Some(target_id) = target {
+            // 发送到特定客户端
+            let clients = self.clients.read().await;
+            if let Some(client) = clients.get(&target_id) {
+                let _ = client.tx.send(data).await;
+            }
+        } else {
+            // 广播到所有客户端
+            let clients = self.clients.read().await;
+            for (_, client) in clients.iter() {
+                let _ = client.tx.send(data.clone()).await;
+            }
+        }
+
+        Ok(())
     }
 
     fn get_ui_to_server_sender(&self) -> Option<Sender<Message>> {
@@ -235,7 +290,18 @@ impl ProtocolHandler for TcpServerHandler {
     }
 
     fn get_connections(&self) -> Vec<ConnectionInfo> {
-        todo!("Implement get_connections for TCP server")
+        // 使用 block_on 来执行异步代码
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let clients = self.clients.read().await;
+            clients
+                .values()
+                .map(|client| ConnectionInfo {
+                    remote_addr: client.addr,
+                    connection_id: client.addr.to_string(),
+                })
+                .collect()
+        })
     }
 
     fn protocol_name(&self) -> &'static str {
@@ -282,15 +348,123 @@ impl TcpClientHandler {
 #[async_trait]
 impl ProtocolHandler for TcpClientHandler {
     async fn start(&mut self) -> Result<()> {
-        todo!("Implement TCP client start")
+        // 连接到远程服务器
+        let stream = TcpStream::connect(self.remote_addr).await?;
+        self.stream = Some(stream);
+        self.running = true;
+
+        // 创建消息通道
+        let (ui_to_server_tx, ui_to_server_rx) = channel::<Message>(100);
+        self.ui_to_server_tx = Some(ui_to_server_tx);
+        self.ui_to_server_rx = Some(ui_to_server_rx);
+
+        // 获取流的引用用于读取任务
+        let stream = self.stream.as_ref().unwrap();
+        let (mut read_half, mut write_half) = stream.into_split();
+        let server_to_ui_tx = self.server_to_ui_tx.clone();
+        let remote_addr = self.remote_addr;
+
+        // 启动读取任务
+        tokio::spawn(async move {
+            let mut buffer = vec![0u8; 4096];
+            loop {
+                match read_half.read(&mut buffer).await {
+                    Ok(0) => {
+                        // 服务器断开连接
+                        if let Some(ref tx) = server_to_ui_tx {
+                            let _ = tx.send(Message {
+                                content: MessageType::ClientDisconnected,
+                                direction: MessageDirection::Received,
+                                timestamp: chrono::Local::now(),
+                                connection_info: Some(ConnectionInfo {
+                                    remote_addr,
+                                    connection_id: remote_addr.to_string(),
+                                }),
+                            }).await;
+                        }
+                        break;
+                    }
+                    Ok(n) => {
+                        let data = &buffer[..n];
+                        let message_content = String::from_utf8_lossy(data).to_string();
+
+                        if let Some(ref tx) = server_to_ui_tx {
+                            let _ = tx.send(Message {
+                                content: MessageType::Text(message_content),
+                                direction: MessageDirection::Received,
+                                timestamp: chrono::Local::now(),
+                                connection_info: Some(ConnectionInfo {
+                                    remote_addr,
+                                    connection_id: remote_addr.to_string(),
+                                }),
+                            }).await;
+                        }
+                    }
+                    Err(e) => {
+                        println!("读取数据时出错: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // 启动写入任务
+        let ui_to_server_rx = self.ui_to_server_rx.take().unwrap();
+        tokio::spawn(async move {
+            let mut rx = ui_to_server_rx;
+            while let Some(msg) = rx.recv().await {
+                let data = match msg.content {
+                    MessageType::Text(text) => Bytes::from(text.into_bytes()),
+                    MessageType::Binary(bytes) => bytes,
+                    _ => continue,
+                };
+
+                if let Err(e) = write_half.write_all(&data).await {
+                    println!("发送数据时出错: {}", e);
+                    break;
+                }
+            }
+        });
+
+        // 通知 UI 已连接
+        if let Some(ref tx) = self.server_to_ui_tx {
+            let _ = tx.send(Message {
+                content: MessageType::ClientConnected,
+                direction: MessageDirection::Received,
+                timestamp: chrono::Local::now(),
+                connection_info: Some(ConnectionInfo {
+                    remote_addr,
+                    connection_id: remote_addr.to_string(),
+                }),
+            }).await;
+        }
+
+        Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {
-        todo!("Implement TCP client stop")
+        self.running = false;
+        if let Some(mut stream) = self.stream.take() {
+            // 关闭连接
+            let _ = stream.shutdown().await;
+        }
+        Ok(())
     }
 
     async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
-        todo!("Implement TCP client send message")
+        if let Some(ref tx) = self.ui_to_server_tx {
+            let msg = Message {
+                content: message,
+                direction: MessageDirection::Sent,
+                timestamp: chrono::Local::now(),
+                connection_info: Some(ConnectionInfo {
+                    remote_addr: self.remote_addr,
+                    connection_id: self.remote_addr.to_string(),
+                }),
+            };
+            let _ = tx.send(msg).await;
+        }
+        Ok(())
     }
 
     fn get_ui_to_server_sender(&self) -> Option<Sender<Message>> {
@@ -306,7 +480,14 @@ impl ProtocolHandler for TcpClientHandler {
     }
 
     fn get_connections(&self) -> Vec<ConnectionInfo> {
-        todo!("Implement get_connections for TCP client")
+        if self.running {
+            vec![ConnectionInfo {
+                remote_addr: self.remote_addr,
+                connection_id: self.remote_addr.to_string(),
+            }]
+        } else {
+            vec![]
+        }
     }
 
     fn protocol_name(&self) -> &'static str {

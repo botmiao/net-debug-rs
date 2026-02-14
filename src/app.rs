@@ -152,8 +152,15 @@ impl App {
                         self.receive_view
                             .close_connection_by_title(&message.connection_info.unwrap().connection_id);
                     }
-                    common::MessageType::Binary(_) => todo!(),
-                    common::MessageType::Hex(_) => todo!(),
+                    common::MessageType::Binary(data) => {
+                        // 将二进制数据显示为十六进制
+                        let hex_str: String = data.iter().map(|b| format!("{:02x}", b)).collect();
+                        self.add_received_message(format!("[Binary] {}", hex_str), None);
+                    }
+                    common::MessageType::Hex(hex_str) => {
+                        // 十六进制消息直接显示
+                        self.add_received_message(format!("[Hex] {}", hex_str), None);
+                    }
                 },
                 core::result::Result::Err(_) => {
                     // 没有消息可接收，继续执行
@@ -217,16 +224,52 @@ impl App {
         Ok(())
     }
 
-    fn send_message(&mut self, message: String) {
+    /// 发送消息（异步版本，用于在异步上下文中调用）
+    pub async fn send_message_async(&mut self, message: String) {
         // 更新统计数据
         self.stats.sent_bytes += message.len();
         self.stats.last_activity = Instant::now();
 
         // 添加消息到发送视图
         self.send_view
-            .add_message(format!("[{}] {}", chrono::Local::now().format("%H:%M:%S"), message));
+            .add_message(format!("[{}] {}", chrono::Local::now().format("%H:%M:%S"), message.clone()));
 
-        todo!("发送消息逻辑需要根据具体协议实现");
+        // 通过协议处理器发送消息
+        let message_type = common::MessageType::Text(message);
+        let target = None; // 可以扩展为发送到特定客户端
+        
+        // 直接调用异步方法
+        let _ = self.protocol_handler.send_message(message_type, target).await;
+    }
+
+    fn send_message(&mut self, message: String) {
+        // 创建一个本地任务来执行异步发送
+        // 注意：这里我们不在同步方法中等待结果，而是让消息在后台发送
+        let message_type = common::MessageType::Text(message.clone());
+        let target = None;
+        
+        // 更新统计数据和 UI
+        self.stats.sent_bytes += message.len();
+        self.stats.last_activity = Instant::now();
+        self.send_view
+            .add_message(format!("[{}] {}", chrono::Local::now().format("%H:%M:%S"), message));
+        
+        // 尝试获取发送器并发送消息
+        // 注意：由于不能直接在同步方法中调用 async 方法，
+        // 我们在这里只是记录消息，实际的发送应该通过其他机制处理
+        // 或者使用 spawn 来在后台执行
+        if let Some(tx) = self.protocol_handler.get_ui_to_server_sender() {
+            let msg = common::Message {
+                content: message_type,
+                direction: common::MessageDirection::Sent,
+                timestamp: chrono::Local::now(),
+                connection_info: None,
+            };
+            // 使用 tokio::spawn 在后台发送，不阻塞当前线程
+            tokio::spawn(async move {
+                let _ = tx.send(msg).await;
+            });
+        }
     }
 
     /// 添加接收到的消息

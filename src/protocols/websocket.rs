@@ -1,21 +1,10 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::{mpsc::{Receiver, Sender, channel}, RwLock},
-};
-use tokio_tungstenite::{
-    accept_async,
-    connect_async,
-    tungstenite::Message as WsMessage,
-    WebSocketStream,
-};
+use tokio::sync::{mpsc::{Receiver, Sender}, RwLock};
 
 use crate::protocols::common::{
-    ConnectionInfo, Message, MessageDirection, MessageType, ProtocolHandler,
+    ConnectionInfo, Message, MessageType, ProtocolHandler,
 };
 
 /// WebSocket 服务器处理器
@@ -40,8 +29,8 @@ pub struct WebSocketServerHandler {
 struct WebSocketClientInfo {
     /// 远程地址
     addr: SocketAddr,
-    /// 发送通道
-    tx: Sender<WsMessage>,
+    /// 连接 ID
+    connection_id: String,
 }
 
 impl WebSocketServerHandler {
@@ -62,22 +51,23 @@ impl WebSocketServerHandler {
 #[async_trait]
 impl ProtocolHandler for WebSocketServerHandler {
     async fn start(&mut self) -> Result<()> {
-        todo!("Implement WebSocket server start")
+        anyhow::bail!("WebSocket server handler not yet fully implemented")
     }
     
     async fn stop(&mut self) -> Result<()> {
-        todo!("Implement WebSocket server stop")
+        self.running = false;
+        Ok(())
     }
     
-    async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
-        todo!("Implement WebSocket server send message")
+    async fn send_message(&mut self, _message: MessageType, _target: Option<String>) -> Result<()> {
+        anyhow::bail!("WebSocket server send not yet implemented")
     }
     
-    fn get_receiver(&self) -> Option<Receiver<Message>> {
-        self.message_rx.clone()
+    fn get_ui_to_server_sender(&self) -> Option<Sender<Message>> {
+        self.message_tx.clone()
     }
     
-    fn set_ui_sender(&mut self, sender: Sender<Message>) {
+    fn set_server_to_ui_sender(&mut self, sender: Sender<Message>) {
         self.ui_tx = Some(sender);
     }
     
@@ -86,7 +76,7 @@ impl ProtocolHandler for WebSocketServerHandler {
     }
     
     fn get_connections(&self) -> Vec<ConnectionInfo> {
-        todo!("Implement get_connections for WebSocket server")
+        vec![]
     }
     
     fn protocol_name(&self) -> &'static str {
@@ -100,8 +90,6 @@ pub struct WebSocketClientHandler {
     local_addr: SocketAddr,
     /// 远程服务器地址
     remote_addr: SocketAddr,
-    /// WebSocket 流
-    ws_stream: Option<WebSocketStream<TcpStream>>,
     /// 控制通道 (用于停止客户端)
     control_tx: Option<Sender<()>>,
     /// 消息接收通道
@@ -120,7 +108,6 @@ impl WebSocketClientHandler {
         Self {
             local_addr,
             remote_addr,
-            ws_stream: None,
             control_tx: None,
             message_rx: None,
             message_tx: None,
@@ -133,22 +120,23 @@ impl WebSocketClientHandler {
 #[async_trait]
 impl ProtocolHandler for WebSocketClientHandler {
     async fn start(&mut self) -> Result<()> {
-        todo!("Implement WebSocket client start")
+        anyhow::bail!("WebSocket client handler not yet fully implemented")
     }
     
     async fn stop(&mut self) -> Result<()> {
-        todo!("Implement WebSocket client stop")
+        self.running = false;
+        Ok(())
     }
     
-    async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
-        todo!("Implement WebSocket client send message")
+    async fn send_message(&mut self, _message: MessageType, _target: Option<String>) -> Result<()> {
+        anyhow::bail!("WebSocket client send not yet implemented")
     }
     
-    fn get_receiver(&self) -> Option<Receiver<Message>> {
-        self.message_rx.clone()
+    fn get_ui_to_server_sender(&self) -> Option<Sender<Message>> {
+        self.message_tx.clone()
     }
     
-    fn set_ui_sender(&mut self, sender: Sender<Message>) {
+    fn set_server_to_ui_sender(&mut self, sender: Sender<Message>) {
         self.ui_tx = Some(sender);
     }
     
@@ -157,7 +145,7 @@ impl ProtocolHandler for WebSocketClientHandler {
     }
     
     fn get_connections(&self) -> Vec<ConnectionInfo> {
-        todo!("Implement get_connections for WebSocket client")
+        vec![]
     }
     
     fn protocol_name(&self) -> &'static str {

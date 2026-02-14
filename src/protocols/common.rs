@@ -120,37 +120,42 @@ pub async fn create_protocol_handler(
             Ok(Box::new(handler))
         }
         ("tcp", false) => {
-            todo!("Create TCP client handler")
+            // 创建 TCP 客户端处理器
+            let remote = remote_addr.ok_or_else(|| anyhow::anyhow!("TCP client requires remote address"))?;
+            let mut handler = crate::protocols::tcp::TcpClientHandler::new(local_addr, remote);
+            handler.set_server_to_ui_sender(server_to_ui_tx.ok_or_else(|| anyhow::anyhow!("Server to UI sender is required"))?);
+            handler.start().await?;
+            Ok(Box::new(handler))
         }
         ("udp", true) => {
-            todo!("Create UDP server handler")
+            anyhow::bail!("UDP server handler not yet implemented")
         }
         ("udp", false) => {
-            todo!("Create UDP client handler")
+            anyhow::bail!("UDP client handler not yet implemented")
         }
         ("websocket", true) => {
-            todo!("Create WebSocket server handler")
+            anyhow::bail!("WebSocket server handler not yet implemented")
         }
         ("websocket", false) => {
-            todo!("Create WebSocket client handler")
+            anyhow::bail!("WebSocket client handler not yet implemented")
         }
         ("http", true) => {
-            todo!("Create HTTP server handler")
+            anyhow::bail!("HTTP server handler not yet implemented")
         }
         ("http", false) => {
-            todo!("Create HTTP client handler")
+            anyhow::bail!("HTTP client handler not yet implemented")
         }
         ("http2", true) => {
-            todo!("Create HTTP/2 server handler")
+            anyhow::bail!("HTTP/2 server handler not yet implemented")
         }
         ("http2", false) => {
-            todo!("Create HTTP/2 client handler")
+            anyhow::bail!("HTTP/2 client handler not yet implemented")
         }
         ("http3", true) => {
-            todo!("Create HTTP/3 server handler")
+            anyhow::bail!("HTTP/3 server handler not yet implemented")
         }
         ("http3", false) => {
-            todo!("Create HTTP/3 client handler")
+            anyhow::bail!("HTTP/3 client handler not yet implemented")
         }
         _ => anyhow::bail!("Unsupported protocol: {}", protocol),
     }
