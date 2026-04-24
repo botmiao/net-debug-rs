@@ -3,7 +3,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use net_debug_rs::protocols::common::{create_protocol_handler, MessageType};
+use net_debug_rs::protocols::common::{
+    create_protocol_handler, Message, MessageDirection, MessageType,
+};
 
 /// 测试 TCP server 能启动并监听端口
 #[tokio::test]
@@ -74,9 +76,15 @@ async fn test_tcp_client_connects() {
     // 创建 client
     let client_local: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let (client_tx, mut client_rx) = tokio::sync::mpsc::channel(100);
-    let mut client = create_protocol_handler("tcp", false, Some(client_tx), client_local, Some(server_addr))
-        .await
-        .expect("Failed to create client");
+    let mut client = create_protocol_handler(
+        "tcp",
+        false,
+        Some(client_tx),
+        client_local,
+        Some(server_addr),
+    )
+    .await
+    .expect("Failed to create client");
 
     assert!(client.is_running());
     assert_eq!(client.protocol_name(), "TCP Client");
@@ -118,7 +126,10 @@ async fn test_tcp_server_send_to_client() {
 
     // server 发送消息给客户端
     server
-        .send_message(MessageType::Text("hello client".to_string()), Some(client_id))
+        .send_message(
+            MessageType::Text("hello client".to_string()),
+            Some(client_id),
+        )
         .await
         .unwrap();
 
@@ -131,4 +142,94 @@ async fn test_tcp_server_send_to_client() {
     assert_eq!(&buf[..n], b"hello client");
 
     server.stop().await.unwrap();
+}
+
+/// 测试 TCP server 会消费 UI 发送通道并转发给目标客户端
+#[tokio::test]
+async fn test_tcp_server_ui_sender_sends_to_target_client() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let (server_tx, mut server_rx) = tokio::sync::mpsc::channel(100);
+    let mut server = create_protocol_handler("tcp", true, Some(server_tx), server_addr, None)
+        .await
+        .unwrap();
+
+    let mut stream = TcpStream::connect(server_addr).await.unwrap();
+
+    let msg = timeout(Duration::from_secs(2), server_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(msg.content, MessageType::ClientConnected));
+    let conn = msg.connection_info.unwrap();
+
+    let ui_tx = server.get_ui_to_server_sender().unwrap();
+    ui_tx
+        .send(Message {
+            content: MessageType::Text("来自服务端".to_string()),
+            direction: MessageDirection::Sent,
+            timestamp: chrono::Local::now(),
+            connection_info: Some(conn),
+        })
+        .await
+        .unwrap();
+
+    let mut buf = vec![0u8; 1024];
+    let n = timeout(Duration::from_secs(2), stream.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(std::str::from_utf8(&buf[..n]).unwrap(), "来自服务端");
+
+    server.stop().await.unwrap();
+}
+
+/// 测试 TCP client 会通过 UI 发送通道发送 Hex 数据
+#[tokio::test]
+async fn test_tcp_client_ui_sender_sends_hex() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = listener.local_addr().unwrap();
+
+    let accept_handle = tokio::spawn(async move {
+        let (stream, _addr) = listener.accept().await.unwrap();
+        stream
+    });
+
+    let client_local: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let (client_tx, mut client_rx) = tokio::sync::mpsc::channel(100);
+    let client = create_protocol_handler(
+        "tcp",
+        false,
+        Some(client_tx),
+        client_local,
+        Some(server_addr),
+    )
+    .await
+    .expect("Failed to create client");
+
+    let _ = timeout(Duration::from_secs(2), client_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut server_stream = accept_handle.await.unwrap();
+
+    let ui_tx = client.get_ui_to_server_sender().unwrap();
+    ui_tx
+        .send(Message {
+            content: MessageType::Hex("E4 B8 AD".to_string()),
+            direction: MessageDirection::Sent,
+            timestamp: chrono::Local::now(),
+            connection_info: None,
+        })
+        .await
+        .unwrap();
+
+    let mut buf = vec![0u8; 16];
+    let n = timeout(Duration::from_secs(2), server_stream.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&buf[..n], "中".as_bytes());
 }

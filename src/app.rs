@@ -7,7 +7,9 @@ use tokio::sync::mpsc::{channel, Receiver};
 use crate::cli::args::{AppMode, Args, ProtocolType};
 use crate::protocols::{common, Message, ProtocolHandler};
 use crate::ui::layout::{AppLayout, LayoutType};
-use crate::ui::widgets::{input_dialog::InputDialog, message_view::MessageView, status_bar::StatusBar};
+use crate::ui::widgets::{
+    input_dialog::InputDialog, message_view::MessageView, status_bar::StatusBar,
+};
 
 /// 应用程序状态
 pub enum InputMode {
@@ -36,7 +38,10 @@ impl Default for Stats {
 
 /// 判断协议是否支持手动发送消息
 fn protocol_supports_send(protocol: &ProtocolType) -> bool {
-    !matches!(protocol, ProtocolType::Http | ProtocolType::Http2 | ProtocolType::Http3)
+    !matches!(
+        protocol,
+        ProtocolType::Http | ProtocolType::Http2 | ProtocolType::Http3
+    )
 }
 
 /// 主应用状态
@@ -98,7 +103,8 @@ impl App {
                 Some(server_to_ui_tx),
                 args.local_addr,
                 args.remote_addr,
-            ).await?
+            )
+            .await?
         };
 
         let app = Self {
@@ -234,7 +240,11 @@ impl App {
                 }
                 KeyCode::Enter => {
                     if let Some(result) = dialog.submit() {
-                        self.send_message_from_dialog(result.input, result.format_hex, result.target_client);
+                        self.send_message_from_dialog(
+                            result.input,
+                            result.format_hex,
+                            result.target_client,
+                        );
                     }
                     self.input_mode = InputMode::Normal;
                     self.input_dialog = None;
@@ -254,7 +264,12 @@ impl App {
         Ok(())
     }
 
-    fn send_message_from_dialog(&mut self, input: String, is_hex: bool, target_client: Option<String>) {
+    fn send_message_from_dialog(
+        &mut self,
+        input: String,
+        is_hex: bool,
+        target_client: Option<String>,
+    ) {
         let message_type = if is_hex {
             match crate::utils::data_format::hex_to_bytes(&input) {
                 Ok(_bytes) => common::MessageType::Hex(input.clone()),
@@ -269,14 +284,24 @@ impl App {
         self.stats.last_activity = Instant::now();
 
         let header = self.format_header(target_client.as_deref());
-        self.send_view.add_message(header, input, target_client.as_deref());
+        self.send_view
+            .add_message(header, input, target_client.as_deref());
 
         if let Some(tx) = self.protocol_handler.get_ui_to_server_sender() {
+            let connection_info = target_client.as_ref().and_then(|connection_id| {
+                connection_id
+                    .parse()
+                    .ok()
+                    .map(|remote_addr| common::ConnectionInfo {
+                        remote_addr,
+                        connection_id: connection_id.clone(),
+                    })
+            });
             let msg = common::Message {
                 content: message_type,
                 direction: common::MessageDirection::Sent,
                 timestamp: chrono::Local::now(),
-                connection_info: None,
+                connection_info,
             };
             tokio::spawn(async move {
                 let _ = tx.send(msg).await;

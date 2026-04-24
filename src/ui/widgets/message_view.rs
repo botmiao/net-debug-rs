@@ -38,10 +38,11 @@ impl MessageView {
         if let Some(tab_name) = tab {
             self.ensure_tabs();
             if let Some(tabs) = &mut self.tabs {
+                push_with_trim(&mut tabs.contents[0], formatted.clone());
                 if let Some(idx) = tabs.titles.iter().position(|t| t == tab_name) {
-                    push_with_trim(&mut tabs.contents[idx], formatted);
-                } else {
-                    push_with_trim(&mut tabs.contents[0], formatted);
+                    if idx != 0 {
+                        push_with_trim(&mut tabs.contents[idx], formatted);
+                    }
                 }
             }
         } else if self.has_multiple_connections {
@@ -76,6 +77,8 @@ impl MessageView {
             tabs.remove_tab_by_title(title);
             if tabs.titles.len() <= 1 {
                 self.has_multiple_connections = false;
+                self.messages = tabs.contents.first().cloned().unwrap_or_default();
+                self.tabs = None;
             }
         }
     }
@@ -93,7 +96,9 @@ impl MessageView {
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().title(self.title.as_str()).borders(Borders::ALL);
+        let block = Block::default()
+            .title(self.title.as_str())
+            .borders(Borders::ALL);
         frame.render_widget(block.clone(), area);
         let inner_area = block.inner(area);
 
@@ -104,7 +109,8 @@ impl MessageView {
                 .split(inner_area);
 
             if let Some(tabs) = &self.tabs {
-                let titles: Vec<Line> = tabs.titles.iter().map(|t| Line::from(t.as_str())).collect();
+                let titles: Vec<Line> =
+                    tabs.titles.iter().map(|t| Line::from(t.as_str())).collect();
                 let tabs_widget = Tabs::new(titles)
                     .block(Block::default().borders(Borders::BOTTOM))
                     .select(tabs.index)
@@ -144,7 +150,10 @@ fn render_messages(frame: &mut Frame, area: Rect, messages: &[String], scroll: u
     }
 
     // 计算每条消息的行数和总行数
-    let heights: Vec<usize> = messages.iter().map(|m| m.matches('\n').count() + 1).collect();
+    let heights: Vec<usize> = messages
+        .iter()
+        .map(|m| m.matches('\n').count() + 1)
+        .collect();
     let total_lines: usize = heights.iter().sum();
 
     // 确定 skip 的行数
@@ -194,4 +203,26 @@ fn render_messages(frame: &mut Frame, area: Rect, messages: &[String], scroll: u
 
     let list = List::new(visible_items);
     frame.render_widget(list, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_tab_contains_messages_added_to_connection_tabs() {
+        let mut view = MessageView::new("Receive");
+
+        view.add_connection("127.0.0.1:12345");
+        view.add_message(
+            "12:00:00 | 127.0.0.1:12345".to_string(),
+            "hello".to_string(),
+            Some("127.0.0.1:12345"),
+        );
+
+        let tabs = view.tabs.as_ref().unwrap();
+        assert_eq!(tabs.contents[0].len(), 1);
+        assert_eq!(tabs.contents[1].len(), 1);
+        assert_eq!(tabs.contents[0][0], tabs.contents[1][0]);
+    }
 }

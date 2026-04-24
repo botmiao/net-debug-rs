@@ -1,14 +1,20 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::{collections::HashMap, net::SocketAddr, sync::{Arc, RwLock}};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-use crate::protocols::common::{ConnectionInfo, Message, MessageDirection, MessageType, ProtocolHandler};
+use crate::protocols::common::{
+    ConnectionInfo, Message, MessageDirection, MessageType, ProtocolHandler,
+};
 
 // 简单的十六进制解码辅助函数
 fn hex_decode(hex_str: &str) -> Option<Vec<u8>> {
@@ -16,18 +22,18 @@ fn hex_decode(hex_str: &str) -> Option<Vec<u8>> {
     if hex_str.is_empty() {
         return Some(Vec::new());
     }
-    
+
     // 移除可能的 0x 前缀
     let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
     let hex_str = hex_str.strip_prefix("0X").unwrap_or(hex_str);
-    
+
     // 移除所有空白字符
     let hex_str: String = hex_str.chars().filter(|c| !c.is_whitespace()).collect();
-    
+
     if hex_str.len() % 2 != 0 {
         return None;
     }
-    
+
     let mut result = Vec::with_capacity(hex_str.len() / 2);
     for i in (0..hex_str.len()).step_by(2) {
         let byte_str = &hex_str[i..i + 2];
@@ -36,8 +42,68 @@ fn hex_decode(hex_str: &str) -> Option<Vec<u8>> {
             Err(_) => return None,
         }
     }
-    
+
     Some(result)
+}
+
+fn message_to_bytes(message: MessageType) -> Option<Bytes> {
+    match message {
+        MessageType::Text(text) => Some(Bytes::from(text.into_bytes())),
+        MessageType::Binary(bytes) => Some(bytes),
+        MessageType::Hex(hex_str) => Some(Bytes::from(hex_decode(&hex_str).unwrap_or_default())),
+        _ => None,
+    }
+}
+
+fn decode_utf8_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> Option<String> {
+    pending.extend_from_slice(chunk);
+
+    match std::str::from_utf8(pending) {
+        Ok(text) => {
+            let text = text.to_string();
+            pending.clear();
+            Some(text)
+        }
+        Err(err) if err.error_len().is_none() => {
+            let valid_up_to = err.valid_up_to();
+            if valid_up_to == 0 {
+                return None;
+            }
+
+            let text = String::from_utf8_lossy(&pending[..valid_up_to]).to_string();
+            pending.drain(..valid_up_to);
+            Some(text)
+        }
+        Err(_) => {
+            let text = String::from_utf8_lossy(pending).to_string();
+            pending.clear();
+            Some(text)
+        }
+    }
+}
+
+async fn send_to_clients(clients: &Arc<RwLock<HashMap<String, TcpClientInfo>>>, message: Message) {
+    let Some(data) = message_to_bytes(message.content) else {
+        return;
+    };
+
+    if let Some(target_id) = message.connection_info.map(|info| info.connection_id) {
+        let sender = {
+            let clients = clients.read().unwrap();
+            clients.get(&target_id).map(|client| client.tx.clone())
+        };
+        if let Some(tx) = sender {
+            let _ = tx.send(data).await;
+        }
+    } else {
+        let senders: Vec<Sender<Bytes>> = {
+            let clients = clients.read().unwrap();
+            clients.values().map(|client| client.tx.clone()).collect()
+        };
+        for tx in senders {
+            let _ = tx.send(data.clone()).await;
+        }
+    }
 }
 
 /// TCP 服务器处理器
@@ -50,8 +116,6 @@ pub struct TcpServerHandler {
     control_tx: Option<Sender<()>>,
     /// UI到服务器发送通道
     ui_to_server_tx: Option<Sender<Message>>,
-    /// UI到服务器接收通道
-    ui_to_server_rx: Option<Receiver<Message>>,
     /// 服务器到UI发送通道
     server_to_ui_tx: Option<Sender<Message>>,
     /// 运行状态
@@ -74,7 +138,6 @@ impl TcpServerHandler {
             clients: Arc::new(RwLock::new(HashMap::new())),
             control_tx: None,
             ui_to_server_tx: None,
-            ui_to_server_rx: None,
             server_to_ui_tx: None,
             running: false,
         }
@@ -89,7 +152,6 @@ impl ProtocolHandler for TcpServerHandler {
         let (control_tx, mut control_rx) = channel::<()>(1);
 
         self.ui_to_server_tx = Some(ui_to_server_tx);
-        self.ui_to_server_rx = Some(ui_to_server_rx);
         self.control_tx = Some(control_tx);
         self.running = true;
 
@@ -98,6 +160,7 @@ impl ProtocolHandler for TcpServerHandler {
 
         let clients = Arc::clone(&self.clients);
         let server_to_ui_tx = self.server_to_ui_tx.clone();
+        let mut ui_to_server_rx = ui_to_server_rx;
 
         // 启动服务器监听任务
         tokio::spawn(async move {
@@ -142,6 +205,7 @@ impl ProtocolHandler for TcpServerHandler {
                                 let read_client_id = client_id.clone();
                                 tokio::spawn(async move {
                                     let mut buffer = vec![0u8; 4096];
+                                    let mut pending_utf8 = Vec::new();
                                     loop {
                                         match read_half.read(&mut buffer).await {
                                             Ok(0) => {
@@ -168,7 +232,9 @@ impl ProtocolHandler for TcpServerHandler {
                                             Ok(n) => {
                                                 // 接收到数据
                                                 let data = &buffer[..n];
-                                                let message_content = String::from_utf8_lossy(data).to_string();
+                                                let Some(message_content) = decode_utf8_chunk(&mut pending_utf8, data) else {
+                                                    continue;
+                                                };
 
                                                 // 发送到UI
                                                 if let Some(ref server_to_ui_sender) = server_to_ui_tx_for_read {
@@ -211,6 +277,15 @@ impl ProtocolHandler for TcpServerHandler {
                         }
                     }
 
+                    // 处理 UI 发起的发送请求
+                    result = ui_to_server_rx.recv() => {
+                        if let Some(message) = result {
+                            send_to_clients(&clients, message).await;
+                        } else {
+                            break;
+                        }
+                    }
+
                     // 处理停止信号 - 明确检查是否收到了信号
                     result = control_rx.recv() => {
                         match result {
@@ -246,14 +321,8 @@ impl ProtocolHandler for TcpServerHandler {
     }
 
     async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
-        let data = match message {
-            MessageType::Text(text) => Bytes::from(text.into_bytes()),
-            MessageType::Binary(bytes) => bytes,
-            MessageType::Hex(hex_str) => {
-                let bytes = hex_decode(&hex_str).unwrap_or_default();
-                Bytes::from(bytes)
-            }
-            _ => return Ok(()),
+        let Some(data) = message_to_bytes(message) else {
+            return Ok(());
         };
 
         if let Some(target_id) = target {
@@ -365,37 +434,45 @@ impl ProtocolHandler for TcpClientHandler {
         // 启动读取任务
         tokio::spawn(async move {
             let mut buffer = vec![0u8; 4096];
+            let mut pending_utf8 = Vec::new();
             loop {
                 match read_half.read(&mut buffer).await {
                     Ok(0) => {
                         // 服务器断开连接
                         if let Some(ref tx) = server_to_ui_tx {
-                            let _ = tx.send(Message {
-                                content: MessageType::ClientDisconnected,
-                                direction: MessageDirection::Received,
-                                timestamp: chrono::Local::now(),
-                                connection_info: Some(ConnectionInfo {
-                                    remote_addr,
-                                    connection_id: remote_addr.to_string(),
-                                }),
-                            }).await;
+                            let _ = tx
+                                .send(Message {
+                                    content: MessageType::ClientDisconnected,
+                                    direction: MessageDirection::Received,
+                                    timestamp: chrono::Local::now(),
+                                    connection_info: Some(ConnectionInfo {
+                                        remote_addr,
+                                        connection_id: remote_addr.to_string(),
+                                    }),
+                                })
+                                .await;
                         }
                         break;
                     }
                     Ok(n) => {
                         let data = &buffer[..n];
-                        let message_content = String::from_utf8_lossy(data).to_string();
+                        let Some(message_content) = decode_utf8_chunk(&mut pending_utf8, data)
+                        else {
+                            continue;
+                        };
 
                         if let Some(ref tx) = server_to_ui_tx {
-                            let _ = tx.send(Message {
-                                content: MessageType::Text(message_content),
-                                direction: MessageDirection::Received,
-                                timestamp: chrono::Local::now(),
-                                connection_info: Some(ConnectionInfo {
-                                    remote_addr,
-                                    connection_id: remote_addr.to_string(),
-                                }),
-                            }).await;
+                            let _ = tx
+                                .send(Message {
+                                    content: MessageType::Text(message_content),
+                                    direction: MessageDirection::Received,
+                                    timestamp: chrono::Local::now(),
+                                    connection_info: Some(ConnectionInfo {
+                                        remote_addr,
+                                        connection_id: remote_addr.to_string(),
+                                    }),
+                                })
+                                .await;
                         }
                     }
                     Err(e) => {
@@ -411,10 +488,8 @@ impl ProtocolHandler for TcpClientHandler {
         tokio::spawn(async move {
             let mut rx = ui_to_server_rx;
             while let Some(msg) = rx.recv().await {
-                let data = match msg.content {
-                    MessageType::Text(text) => Bytes::from(text.into_bytes()),
-                    MessageType::Binary(bytes) => bytes,
-                    _ => continue,
+                let Some(data) = message_to_bytes(msg.content) else {
+                    continue;
                 };
 
                 if let Err(e) = write_half.write_all(&data).await {
@@ -426,15 +501,17 @@ impl ProtocolHandler for TcpClientHandler {
 
         // 通知 UI 已连接
         if let Some(ref tx) = self.server_to_ui_tx {
-            let _ = tx.send(Message {
-                content: MessageType::ClientConnected,
-                direction: MessageDirection::Received,
-                timestamp: chrono::Local::now(),
-                connection_info: Some(ConnectionInfo {
-                    remote_addr,
-                    connection_id: remote_addr.to_string(),
-                }),
-            }).await;
+            let _ = tx
+                .send(Message {
+                    content: MessageType::ClientConnected,
+                    direction: MessageDirection::Received,
+                    timestamp: chrono::Local::now(),
+                    connection_info: Some(ConnectionInfo {
+                        remote_addr,
+                        connection_id: remote_addr.to_string(),
+                    }),
+                })
+                .await;
         }
 
         Ok(())
@@ -490,5 +567,22 @@ impl ProtocolHandler for TcpClientHandler {
 
     fn protocol_name(&self) -> &'static str {
         "TCP Client"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_utf8_chunk_preserves_split_multibyte_character() {
+        let mut pending = Vec::new();
+
+        assert_eq!(decode_utf8_chunk(&mut pending, &[0xE4, 0xB8]), None);
+        assert_eq!(
+            decode_utf8_chunk(&mut pending, &[0xAD]),
+            Some("中".to_string())
+        );
+        assert!(pending.is_empty());
     }
 }

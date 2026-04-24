@@ -69,10 +69,14 @@ impl InputDialog {
 
     pub fn draw(&self, frame: &mut Frame) {
         let area = frame.area();
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
         let width = area.width.min(60);
-        let height = 10;
-        let x = (area.width - width) / 2;
-        let y = (area.height - height) / 2;
+        let height = area.height.min(10);
+        let x = area.width.saturating_sub(width) / 2;
+        let y = area.height.saturating_sub(height) / 2;
         let dialog_area = Rect::new(x, y, width, height);
 
         frame.render_widget(Clear, dialog_area);
@@ -101,16 +105,13 @@ impl InputDialog {
             .constraints([Constraint::Length(8), Constraint::Min(0)])
             .split(chunks[0]);
 
-        let format_tabs = Tabs::new(vec![
-            Line::from("String"),
-            Line::from("Hex"),
-        ])
-        .select(match self.format_type {
-            FormatType::String => 0,
-            FormatType::Hex => 1,
-        })
-        .style(Style::default().fg(Color::White))
-        .highlight_style(Style::default().fg(Color::Yellow));
+        let format_tabs = Tabs::new(vec![Line::from("String"), Line::from("Hex")])
+            .select(match self.format_type {
+                FormatType::String => 0,
+                FormatType::Hex => 1,
+            })
+            .style(Style::default().fg(Color::White))
+            .highlight_style(Style::default().fg(Color::Yellow));
         frame.render_widget(Paragraph::new("Format:"), format_chunks[0]);
         frame.render_widget(format_tabs, format_chunks[1]);
 
@@ -122,7 +123,10 @@ impl InputDialog {
                 .split(chunks[1]);
 
             let client_tabs = Tabs::new(
-                self.clients.iter().map(|c| Line::from(c.clone())).collect::<Vec<_>>(),
+                self.clients
+                    .iter()
+                    .map(|c| Line::from(c.clone()))
+                    .collect::<Vec<_>>(),
             )
             .select(self.selected_client.unwrap_or(0))
             .style(Style::default().fg(Color::White))
@@ -147,9 +151,28 @@ impl InputDialog {
 
         frame.render_widget(input_paragraph, chunks[3]);
 
-        frame.set_cursor_position((
-            chunks[3].x + 1 + self.input.len() as u16,
-            chunks[3].y + 1,
-        ));
+        if chunks[3].width > 2 && chunks[3].height > 2 {
+            let cursor_x = chunks[3]
+                .x
+                .saturating_add(1)
+                .saturating_add(self.input.len() as u16)
+                .min(chunks[3].right().saturating_sub(2));
+            frame.set_cursor_position((cursor_x, chunks[3].y + 1));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn draw_does_not_panic_on_short_terminal_after_resize() {
+        let backend = TestBackend::new(20, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let dialog = InputDialog::new();
+
+        terminal.draw(|frame| dialog.draw(frame)).unwrap();
     }
 }
