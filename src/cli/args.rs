@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 /// 终端网络调试工具
 #[derive(Parser, Debug, Clone)]
-#[command(name = "nt", author, version, about)]
+#[command(name = "netd", author, version, about)]
 pub struct Cli {
     /// 使用垂直分割布局 (发送区在上，接收区在下)，默认为水平布局 (左右)
     #[arg(short, long)]
@@ -280,4 +280,34 @@ fn parse_address(addr_str: &str) -> SocketAddr {
 /// 为HTTP客户端模式生成一个虚拟地址，因为HTTP客户端不需要绑定到特定地址
 fn parse_dummy_addr() -> SocketAddr {
     "127.0.0.1:0".parse().unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_address_port_only() {
+        let addr = parse_address("8000");
+        assert_eq!(addr, "127.0.0.1:8000".parse().unwrap());
+    }
+
+    #[test]
+    fn test_parse_address_full() {
+        let addr = parse_address("192.168.1.1:9000");
+        assert_eq!(addr, "192.168.1.1:9000".parse().unwrap());
+    }
+
+    #[test]
+    fn test_parse_address_invalid_defaults() {
+        let addr = parse_address("not_an_address");
+        assert_eq!(addr, "127.0.0.1:8000".parse().unwrap());
+    }
+
+    #[test]
+    fn test_parse_dummy_addr() {
+        let addr = parse_dummy_addr();
+        assert!(addr.is_ipv4());
+        assert_eq!(addr.port(), 0);
+    }
 }

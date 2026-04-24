@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::Span,
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -43,7 +43,7 @@ impl StatusBar {
 
     /// 绘制底部状态栏 (快捷键提示)
     pub fn draw_bottom_bar(&self, frame: &mut Frame, area: Rect) {
-        let help_text = " Ctrl+C: Quit | I: Input Message ";
+        let help_text = " Ctrl+C: Quit | Ctrl+I: Input Message ";
 
         let help_widget = Paragraph::new(Span::styled(
             help_text,

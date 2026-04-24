@@ -1,7 +1,7 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span, Text},
+    text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Tabs},
     Frame,
 };
@@ -62,7 +62,7 @@ impl InputDialog {
     /// 绘制对话框
     pub fn draw(&self, frame: &mut Frame) {
         // 计算对话框的尺寸和位置
-        let area = frame.size();
+        let area = frame.area();
         let width = area.width.min(60);
         let height = 10;
         let x = (area.width - width) / 2;
@@ -93,7 +93,12 @@ impl InputDialog {
         // 绘制对话框边框
         frame.render_widget(block, dialog_area);
 
-        // 绘制格式选择标签
+        // 绘制格式选择标签 — 将标签和 Tabs 并排放置
+        let format_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(8), Constraint::Min(0)])
+            .split(chunks[0]);
+
         let format_tabs = Tabs::new(vec![
             Line::from("String"),
             Line::from("Hex"),
@@ -104,30 +109,35 @@ impl InputDialog {
         })
         .style(Style::default().fg(Color::White))
         .highlight_style(Style::default().fg(Color::Yellow));
-        frame.render_widget(Paragraph::new("Format:"), chunks[0]);
-        frame.render_widget(format_tabs, chunks[0]);
+        frame.render_widget(Paragraph::new("Format:"), format_chunks[0]);
+        frame.render_widget(format_tabs, format_chunks[1]);
 
-        // 如果有客户端，绘制客户端选择
+        // 如果有客户端，绘制客户端选择 — 将标签和 Tabs 并排放置
         if !self.clients.is_empty() {
+            let client_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(8), Constraint::Min(0)])
+                .split(chunks[1]);
+
             let client_names: Vec<Line> = self.clients.iter().map(|c| Line::from(c.clone())).collect();
             let client_tabs = Tabs::new(client_names)
                 .select(self.selected_client.unwrap_or(0))
                 .style(Style::default().fg(Color::White))
                 .highlight_style(Style::default().fg(Color::Yellow));
-            
-            frame.render_widget(Paragraph::new("Client:"), chunks[1]);
-            frame.render_widget(client_tabs, chunks[1]);
+
+            frame.render_widget(Paragraph::new("Client:"), client_chunks[0]);
+            frame.render_widget(client_tabs, client_chunks[1]);
         }
 
         // 绘制输入区域
         let input_block = Block::default()
             .borders(Borders::ALL)
             .style(Style::default());
-        
+
         let input_paragraph = Paragraph::new(self.input.as_str())
             .block(input_block)
             .style(Style::default().fg(Color::White));
-        
+
         frame.render_widget(input_paragraph, chunks[3]);
 
         // 显示光标

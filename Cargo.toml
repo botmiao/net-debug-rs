@@ -1,9 +1,13 @@
 [package]
-name = "nt"
+name = "net-debug-rs"
 version = "0.1.0"
 edition = "2021"
 description = "A terminal-based network protocol debugging tool"
 authors = ["Your Name <your.email@example.com>"]
+
+[[bin]]
+name = "netd"
+path = "src/main.rs"
 
 [dependencies]
 # UI相关

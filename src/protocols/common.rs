@@ -2,9 +2,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Local};
-use h2::server;
 use std::net::SocketAddr;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 
 use crate::protocols::tcp::TcpServerHandler;
 
@@ -158,5 +157,58 @@ pub async fn create_protocol_handler(
             anyhow::bail!("HTTP/3 client handler not yet implemented")
         }
         _ => anyhow::bail!("Unsupported protocol: {}", protocol),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn test_message_new_received() {
+        let msg = Message::new_received(
+            MessageType::Text("hello".to_string()),
+            None,
+        );
+        assert_eq!(msg.direction, MessageDirection::Received);
+        assert!(matches!(msg.content, MessageType::Text(ref s) if s == "hello"));
+        assert!(msg.connection_info.is_none());
+    }
+
+    #[test]
+    fn test_message_new_sent() {
+        let conn = ConnectionInfo {
+            remote_addr: "127.0.0.1:8000".parse().unwrap(),
+            connection_id: "test-conn".to_string(),
+        };
+        let msg = Message::new_sent(
+            MessageType::Binary(Bytes::from_static(b"data")),
+            Some(conn),
+        );
+        assert_eq!(msg.direction, MessageDirection::Sent);
+        assert!(matches!(msg.content, MessageType::Binary(_)));
+        assert!(msg.connection_info.is_some());
+    }
+
+    #[test]
+    fn test_message_type_variants() {
+        let text = MessageType::Text("hello".to_string());
+        let binary = MessageType::Binary(Bytes::from_static(b"\x01\x02"));
+        let hex = MessageType::Hex("0102FF".to_string());
+        let connected = MessageType::ClientConnected;
+        let disconnected = MessageType::ClientDisconnected;
+
+        assert!(matches!(text, MessageType::Text(_)));
+        assert!(matches!(binary, MessageType::Binary(_)));
+        assert!(matches!(hex, MessageType::Hex(_)));
+        assert!(matches!(connected, MessageType::ClientConnected));
+        assert!(matches!(disconnected, MessageType::ClientDisconnected));
+    }
+
+    #[test]
+    fn test_message_direction_equality() {
+        assert_eq!(MessageDirection::Received, MessageDirection::Received);
+        assert_ne!(MessageDirection::Received, MessageDirection::Sent);
     }
 }

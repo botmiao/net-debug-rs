@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use anyhow::{Ok, Result};
 use crossterm::event::{KeyCode, KeyModifiers};
-use tokio::sync::mpsc::{channel, unbounded_channel, Receiver};
+use tokio::sync::mpsc::{channel, Receiver};
 
 use crate::cli::args::{AppMode, Args, ProtocolType};
 use crate::protocols::{common, Message, ProtocolHandler};
@@ -114,8 +114,24 @@ impl App {
             },
         };
 
-        let handler =
-            common::create_protocol_handler("tcp", true, Some(server_to_ui_tx), args.local_addr, None).await?;
+        let handler = {
+            let protocol_name = match args.protocol {
+                ProtocolType::Tcp => "tcp",
+                ProtocolType::Udp => "udp",
+                ProtocolType::WebSocket => "websocket",
+                ProtocolType::Http => "http",
+                ProtocolType::Http2 => "http2",
+                ProtocolType::Http3 => "http3",
+            };
+            let is_server = args.mode == AppMode::Server;
+            common::create_protocol_handler(
+                protocol_name,
+                is_server,
+                Some(server_to_ui_tx),
+                args.local_addr,
+                args.remote_addr,
+            ).await?
+        };
 
         let app = Self {
             should_quit: false,
@@ -145,10 +161,12 @@ impl App {
                         self.add_received_message(txt, None);
                     }
                     common::MessageType::ClientConnected => {
+                        self.set_connected(true);
                         self.receive_view
                             .add_connection(&message.connection_info.unwrap().connection_id);
                     }
                     common::MessageType::ClientDisconnected => {
+                        self.set_connected(false);
                         self.receive_view
                             .close_connection_by_title(&message.connection_info.unwrap().connection_id);
                     }
@@ -185,8 +203,8 @@ impl App {
                 self.should_quit = true;
             }
 
-            // 输入模式 (I)
-            (KeyCode::Char('i'), KeyModifiers::NONE) => {
+            // 输入模式 (Ctrl+I)
+            (KeyCode::Char('i'), KeyModifiers::CONTROL) => {
                 self.input_mode = InputMode::Editing;
                 self.input_dialog = Some(InputDialog::new());
             }
@@ -196,7 +214,7 @@ impl App {
     }
 
     /// 处理编辑模式键盘输入
-    fn handle_editing_mode_key(&mut self, key: KeyCode, modifiers: KeyModifiers) -> Result<()> {
+    fn handle_editing_mode_key(&mut self, key: KeyCode, _modifiers: KeyModifiers) -> Result<()> {
         if let Some(dialog) = &mut self.input_dialog {
             match key {
                 KeyCode::Esc => {
@@ -246,7 +264,7 @@ impl App {
         // 创建一个本地任务来执行异步发送
         // 注意：这里我们不在同步方法中等待结果，而是让消息在后台发送
         let message_type = common::MessageType::Text(message.clone());
-        let target = None;
+        let _target: Option<String> = None;
         
         // 更新统计数据和 UI
         self.stats.sent_bytes += message.len();

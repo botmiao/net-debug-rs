@@ -1,12 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use bytes::Bytes;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::net::UdpSocket;
-use tokio::sync::{mpsc::{Receiver, Sender, channel}, RwLock};
+use tokio::sync::{mpsc::{Receiver, Sender}, RwLock};
 
 use crate::protocols::common::{
-    ConnectionInfo, Message, MessageDirection, MessageType, ProtocolHandler,
+    ConnectionInfo, Message, MessageType, ProtocolHandler,
 };
 
 /// UDP 服务器处理器

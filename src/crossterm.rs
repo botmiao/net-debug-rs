@@ -1,8 +1,8 @@
-use std::error::Error;
 use std::io;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind};
+use anyhow::Result;
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::{Backend, CrosstermBackend};
@@ -12,7 +12,7 @@ use crate::app::App;
 use crate::cli::args::Args;
 use crate::ui::ui;
 
-pub async fn run(tick_rate: Duration, enhanced_graphics: bool, args: Args) -> Result<(), Box<dyn Error>> {
+pub async fn run(tick_rate: Duration, _enhanced_graphics: bool, args: Args) -> Result<()> {
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -41,7 +41,7 @@ async fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
     tick_rate: Duration,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let mut last_tick = Instant::now();
     loop {
         // 检查应用是否需要退出

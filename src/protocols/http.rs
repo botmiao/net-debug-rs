@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 
 use crate::protocols::common::{
     ConnectionInfo, Message, MessageType, ProtocolHandler,

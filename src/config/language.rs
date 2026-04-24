@@ -97,10 +97,53 @@ fn detect_system_language() -> Language {
     Language::English
 }
 
+// 全局语言管理器实例
+// FluentBundle 内部包含 RefCell<TypeMap>，不是 Send+Sync，
+// 因此使用 thread_local 避免跨线程问题
+thread_local! {
+    static GLOBAL_LANGUAGE_MANAGER: LanguageManager = LanguageManager::new();
+}
+
 // 创建一个便捷的获取本地化文本的函数
 pub fn t(key: &str) -> String {
-    // 为了避免在测试和编译时实际加载资源文件，这里只是返回键
-    // 在实际使用时替换为实际获取本地化文本的逻辑
-    // 完整实现需要在程序启动时初始化 LanguageManager
-    key.to_string()
+    GLOBAL_LANGUAGE_MANAGER.with(|mgr| mgr.get_text(key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_language_manager_new() {
+        let _mgr = LanguageManager::new();
+    }
+
+    #[test]
+    fn test_get_text_existing_key() {
+        let mgr = LanguageManager::new();
+        // en.ftl 和 zh-CN.ftl 中都有的 key
+        let result = mgr.get_text("app-name");
+        // 至少不应该返回空字符串（key 本身就是返回值）
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_get_text_missing_key() {
+        let mgr = LanguageManager::new();
+        let result = mgr.get_text("nonexistent-key-xyz");
+        assert_eq!(result, "nonexistent-key-xyz");
+    }
+
+    #[test]
+    fn test_t_function() {
+        let result = t("app-name");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_detect_system_language() {
+        // 只要能运行不 panic 就行
+        let lang = detect_system_language();
+        assert!(matches!(lang, Language::English | Language::Chinese));
+    }
 }

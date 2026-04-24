@@ -57,11 +57,11 @@ mod tests {
         let original = vec![0x01, 0x02, 0xAB, 0xFF];
         let hex = bytes_to_hex(&original);
         assert_eq!(hex, "01 02 AB FF");
-        
+
         let bytes = hex_to_bytes(&hex).unwrap();
         assert_eq!(bytes, original);
     }
-    
+
     #[test]
     fn test_hex_conversion_no_spaces() {
         let hex = "0102ABFF";
@@ -71,7 +71,46 @@ mod tests {
 
     #[test]
     fn test_invalid_hex() {
-        assert!(hex_to_bytes("0102ABFG").is_err()); // 非法字符 'G'
-        assert!(hex_to_bytes("0102ABF").is_err());  // 奇数长度
+        assert!(hex_to_bytes("0102ABFG").is_err());
+        assert!(hex_to_bytes("0102ABF").is_err());
+    }
+
+    #[test]
+    fn test_hex_with_spaces() {
+        let hex = "01 02 AB FF";
+        let bytes = hex_to_bytes(hex).unwrap();
+        assert_eq!(bytes, vec![0x01, 0x02, 0xAB, 0xFF]);
+    }
+
+    #[test]
+    fn test_empty_hex() {
+        assert_eq!(hex_to_bytes("").unwrap(), Vec::<u8>::new());
+        assert_eq!(hex_to_bytes("  ").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_format_json_valid() {
+        let json = r#"{"key":"value"}"#;
+        let formatted = format_json(json);
+        assert!(formatted.contains('\n'));
+    }
+
+    #[test]
+    fn test_format_json_invalid() {
+        let bad_json = "not json";
+        assert_eq!(format_json(bad_json), "not json");
+    }
+
+    #[test]
+    fn test_string_bytes_roundtrip() {
+        let original = "Hello, 世界!";
+        let bytes = string_to_bytes(original);
+        let back = bytes_to_string(&bytes);
+        assert_eq!(back, original);
+    }
+
+    #[test]
+    fn test_bytes_to_hex_empty() {
+        assert_eq!(bytes_to_hex(&[]), "");
     }
 }

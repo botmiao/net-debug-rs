@@ -1,14 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::{Arc, RwLock}};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        RwLock,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
 };
 
 use crate::protocols::common::{ConnectionInfo, Message, MessageDirection, MessageType, ProtocolHandler};
@@ -116,7 +113,7 @@ impl ProtocolHandler for TcpServerHandler {
 
                                 // 保存客户端信息
                                 {
-                                    let mut clients_lock = clients.write().await;
+                                    let mut clients_lock = clients.write().unwrap();
                                     clients_lock.insert(client_id.clone(), TcpClientInfo {
                                         addr,
                                         tx: client_tx,
@@ -150,7 +147,7 @@ impl ProtocolHandler for TcpServerHandler {
                                             Ok(0) => {
                                                 // 从客户端列表中移除
                                                 {
-                                                    let mut clients_lock = clients_for_read.write().await;
+                                                    let mut clients_lock = clients_for_read.write().unwrap();
                                                     clients_lock.remove(&read_client_id);
                                                 }
 
@@ -253,24 +250,29 @@ impl ProtocolHandler for TcpServerHandler {
             MessageType::Text(text) => Bytes::from(text.into_bytes()),
             MessageType::Binary(bytes) => bytes,
             MessageType::Hex(hex_str) => {
-                // 将十六进制字符串转换为字节
                 let bytes = hex_decode(&hex_str).unwrap_or_default();
                 Bytes::from(bytes)
             }
-            _ => return Ok(()), // 不支持发送其他类型的消息
+            _ => return Ok(()),
         };
 
         if let Some(target_id) = target {
-            // 发送到特定客户端
-            let clients = self.clients.read().await;
-            if let Some(client) = clients.get(&target_id) {
-                let _ = client.tx.send(data).await;
+            // 发送到特定客户端 — 在 await 前释放锁
+            let sender = {
+                let clients = self.clients.read().unwrap();
+                clients.get(&target_id).map(|c| c.tx.clone())
+            };
+            if let Some(tx) = sender {
+                let _ = tx.send(data).await;
             }
         } else {
-            // 广播到所有客户端
-            let clients = self.clients.read().await;
-            for (_, client) in clients.iter() {
-                let _ = client.tx.send(data.clone()).await;
+            // 广播到所有客户端 — 在 await 前释放锁
+            let senders: Vec<Sender<Bytes>> = {
+                let clients = self.clients.read().unwrap();
+                clients.values().map(|c| c.tx.clone()).collect()
+            };
+            for tx in senders {
+                let _ = tx.send(data.clone()).await;
             }
         }
 
@@ -290,18 +292,14 @@ impl ProtocolHandler for TcpServerHandler {
     }
 
     fn get_connections(&self) -> Vec<ConnectionInfo> {
-        // 使用 block_on 来执行异步代码
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            let clients = self.clients.read().await;
-            clients
-                .values()
-                .map(|client| ConnectionInfo {
-                    remote_addr: client.addr,
-                    connection_id: client.addr.to_string(),
-                })
-                .collect()
-        })
+        let clients = self.clients.read().unwrap();
+        clients
+            .values()
+            .map(|client| ConnectionInfo {
+                remote_addr: client.addr,
+                connection_id: client.addr.to_string(),
+            })
+            .collect()
     }
 
     fn protocol_name(&self) -> &'static str {
@@ -358,8 +356,8 @@ impl ProtocolHandler for TcpClientHandler {
         self.ui_to_server_tx = Some(ui_to_server_tx);
         self.ui_to_server_rx = Some(ui_to_server_rx);
 
-        // 获取流的引用用于读取任务
-        let stream = self.stream.as_ref().unwrap();
+        // 获取流的所有权用于读取任务
+        let stream = self.stream.take().unwrap();
         let (mut read_half, mut write_half) = stream.into_split();
         let server_to_ui_tx = self.server_to_ui_tx.clone();
         let remote_addr = self.remote_addr;
@@ -451,7 +449,7 @@ impl ProtocolHandler for TcpClientHandler {
         Ok(())
     }
 
-    async fn send_message(&mut self, message: MessageType, target: Option<String>) -> Result<()> {
+    async fn send_message(&mut self, message: MessageType, _target: Option<String>) -> Result<()> {
         if let Some(ref tx) = self.ui_to_server_tx {
             let msg = Message {
                 content: message,

@@ -114,3 +114,69 @@ impl TabsState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_tabs() {
+        let tabs = TabsState::new(vec!["Tab1".to_string(), "Tab2".to_string()]);
+        assert_eq!(tabs.titles.len(), 2);
+        assert_eq!(tabs.index, 0);
+        assert_eq!(tabs.contents.len(), 2);
+    }
+
+    #[test]
+    fn test_add_tab() {
+        let mut tabs = TabsState::new(vec!["Tab1".to_string()]);
+        tabs.add_tab("Tab2".to_string());
+        assert_eq!(tabs.titles.len(), 2);
+        assert_eq!(tabs.contents.len(), 2);
+        assert_eq!(tabs.titles[1], "Tab2");
+    }
+
+    #[test]
+    fn test_remove_tab() {
+        let mut tabs = TabsState::new(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        tabs.remove_tab(1);
+        assert_eq!(tabs.titles, vec!["A", "C"]);
+        assert!(tabs.index <= 1);
+    }
+
+    #[test]
+    fn test_remove_tab_by_title() {
+        let mut tabs = TabsState::new(vec!["A".to_string(), "B".to_string()]);
+        tabs.remove_tab_by_title("A");
+        assert_eq!(tabs.titles, vec!["B"]);
+    }
+
+    #[test]
+    fn test_next_previous() {
+        let mut tabs = TabsState::new(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        assert_eq!(tabs.index, 0);
+        tabs.next();
+        assert_eq!(tabs.index, 1);
+        tabs.next();
+        assert_eq!(tabs.index, 2);
+        tabs.next();
+        assert_eq!(tabs.index, 0); // wrap
+        tabs.previous();
+        assert_eq!(tabs.index, 2); // wrap
+    }
+
+    #[test]
+    fn test_add_message() {
+        let mut tabs = TabsState::new(vec!["A".to_string()]);
+        tabs.add_message(0, "hello".to_string());
+        assert_eq!(tabs.contents[0], vec!["hello"]);
+    }
+
+    #[test]
+    fn test_remove_last_tab_resets_index() {
+        let mut tabs = TabsState::new(vec!["Only".to_string()]);
+        tabs.remove_tab(0);
+        assert!(tabs.titles.is_empty());
+        assert_eq!(tabs.index, 0);
+    }
+}

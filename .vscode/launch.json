@@ -8,7 +8,7 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug",
-            "program": "${workspaceFolder}/target/debug/nt",
+            "program": "${workspaceFolder}/target/debug/netd",
             "args": [
                 "tcps",
                 "8000"
