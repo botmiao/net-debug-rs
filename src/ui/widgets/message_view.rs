@@ -2,23 +2,21 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, Tabs},
     Frame,
 };
 
 use crate::ui::widgets::tabs::TabsState;
 
+const MAX_MESSAGES: usize = 100;
+
 /// 消息视图组件
 pub struct MessageView {
-    /// 标题
     title: String,
-    /// 消息列表
+    /// 预格式化的消息列表（非 tab 模式）
     messages: Vec<String>,
-    /// 是否有多个连接 (需要使用 tabs)
     has_multiple_connections: bool,
-    /// 标签页状态 (用于多连接)
     tabs: Option<TabsState>,
-    /// 滚动位置
     scroll: usize,
 }
 
@@ -32,64 +30,44 @@ impl MessageView {
             scroll: 0,
         }
     }
-    /// 添加消息
-    pub fn add_message(&mut self, message: String) {
-        self.messages.push(message);
 
-        // 自动滚动到底部
-        if self.messages.len() > 100 {
-            // 保持最新的100条消息，避免内存占用过多
-            self.messages = self.messages.split_off(self.messages.len() - 100);
-        }
-    }
+    /// 添加消息（两行格式：header 和 content）
+    pub fn add_message(&mut self, header: String, content: String, tab: Option<&str>) {
+        let formatted = format_message(&header, &content);
 
-    /// 添加消息到指定标签页
-    pub fn add_message_to_tab(&mut self, tab_index: usize, message: String) {
-        if let Some(tabs) = &mut self.tabs {
-            tabs.add_message(tab_index, message);
-        } else {
-            // 如果没有 tabs，创建一个
-            self.initialize_tabs();
+        if let Some(tab_name) = tab {
+            self.ensure_tabs();
             if let Some(tabs) = &mut self.tabs {
-                tabs.add_message(tab_index, message);
-            }
-        }
-    }
-
-    /// 初始化标签页
-    pub fn initialize_tabs(&mut self) {
-        if self.tabs.is_none() {
-            self.tabs = Some(TabsState::new(vec!["Default".to_string()]));
-            self.has_multiple_connections = true;
-
-            // 将现有消息移到默认标签页
-            if let Some(tabs) = &mut self.tabs {
-                for msg in &self.messages {
-                    tabs.add_message(0, msg.clone());
+                if let Some(idx) = tabs.titles.iter().position(|t| t == tab_name) {
+                    push_with_trim(&mut tabs.contents[idx], formatted);
+                } else {
+                    push_with_trim(&mut tabs.contents[0], formatted);
                 }
             }
-        }
-    }
-
-    /// 添加新的连接标签页
-    pub fn add_connection(&mut self, connection_name: &str) {
-        self.has_multiple_connections = true;
-        if let Some(tabs) = &mut self.tabs {
-            tabs.add_tab(connection_name.to_string());
-        } else {
-            let mut tabs = TabsState::new(vec!["Default".to_string()]);
-            tabs.add_tab(connection_name.to_string());
-            self.tabs = Some(tabs);
-        }
-    }
-
-    /// 关闭连接标签页
-    pub fn close_connection(&mut self, tab_index: usize) {
-        if let Some(tabs) = &mut self.tabs {
-            tabs.remove_tab(tab_index);
-            if tabs.titles.len() <= 1 {
-                self.has_multiple_connections = false;
+        } else if self.has_multiple_connections {
+            if let Some(tabs) = &mut self.tabs {
+                push_with_trim(&mut tabs.contents[tabs.index], formatted);
             }
+        } else {
+            push_with_trim(&mut self.messages, formatted);
+        }
+    }
+
+    fn ensure_tabs(&mut self) {
+        if self.tabs.is_none() {
+            let mut tabs = TabsState::new(vec!["All".to_string()]);
+            for msg in self.messages.drain(..) {
+                tabs.contents[0].push(msg);
+            }
+            self.tabs = Some(tabs);
+            self.has_multiple_connections = true;
+        }
+    }
+
+    pub fn add_connection(&mut self, connection_name: &str) {
+        self.ensure_tabs();
+        if let Some(tabs) = &mut self.tabs {
+            tabs.add_tab(connection_name.to_string());
         }
     }
 
@@ -102,151 +80,118 @@ impl MessageView {
         }
     }
 
-    /// 清除所有消息
-    pub fn clear(&mut self) {
-        self.messages.clear();
-        self.scroll = 0;
-
-        if let Some(tabs) = &mut self.tabs {
-            for content in &mut tabs.contents {
-                content.clear();
-            }
-        }
-    }
-
-    /// 向上滚动
-    pub fn scroll_up(&mut self) {
-        if self.scroll > 0 {
-            self.scroll -= 1;
-        }
-    }
-
-    /// 向下滚动
-    pub fn scroll_down(&mut self, max_visible: usize) {
-        if self.scroll + max_visible < self.messages.len() {
-            self.scroll += 1;
-        }
-    }
-
-    /// 滚动到顶部
-    pub fn scroll_to_top(&mut self) {
-        self.scroll = 0;
-    }
-
-    /// 滚动到底部
-    pub fn scroll_to_bottom(&mut self, max_visible: usize) {
-        if self.messages.len() > max_visible {
-            self.scroll = self.messages.len() - max_visible;
-        } else {
-            self.scroll = 0;
-        }
-    }
-
-    /// 下一个标签页
     pub fn next_tab(&mut self) {
         if let Some(tabs) = &mut self.tabs {
             tabs.next();
         }
     }
 
-    /// 上一个标签页
     pub fn prev_tab(&mut self) {
         if let Some(tabs) = &mut self.tabs {
             tabs.previous();
         }
     }
-    /// 绘制视图
+
     pub fn draw(&self, frame: &mut Frame, area: Rect) {
-        // 创建一个带边框的块
-        let block = Block::default().title(self.title.clone()).borders(Borders::ALL);
-
-        // 绘制边框
+        let block = Block::default().title(self.title.as_str()).borders(Borders::ALL);
         frame.render_widget(block.clone(), area);
-
-        // 计算内部区域
         let inner_area = block.inner(area);
 
-        // 如果有多个连接，使用标签页布局
         if self.has_multiple_connections && self.tabs.is_some() {
-            // 在此区域渲染标签页和内容
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // 标签栏高度
-                    Constraint::Min(0),    // 消息内容区高度
-                ])
+                .constraints([Constraint::Length(3), Constraint::Min(0)])
                 .split(inner_area);
 
-            // 绘制标签页
             if let Some(tabs) = &self.tabs {
-                // 渲染标签页标题
                 let titles: Vec<Line> = tabs.titles.iter().map(|t| Line::from(t.as_str())).collect();
-
-                let tabs_widget = ratatui::widgets::Tabs::new(titles)
+                let tabs_widget = Tabs::new(titles)
                     .block(Block::default().borders(Borders::BOTTOM))
                     .select(tabs.index)
-                    .style(Style::default())
                     .highlight_style(Style::default().fg(Color::LightCyan));
-
                 frame.render_widget(tabs_widget, chunks[0]);
 
-                // 渲染当前选中标签页的内容
                 if tabs.index < tabs.contents.len() {
-                    let messages = &tabs.contents[tabs.index];
-                    let max_visible = chunks[1].height as usize;
-
-                    let items: Vec<ListItem> = if !messages.is_empty() {
-                        let start_idx = if messages.len() > max_visible {
-                            messages.len() - max_visible + self.scroll
-                        } else {
-                            0
-                        };
-
-                        let visible_messages = &messages[start_idx.min(messages.len())..];
-
-                        visible_messages
-                            .iter()
-                            .map(|m| ListItem::new(Line::from(vec![Span::raw(m)])))
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-
-                    // 创建列表小部件
-                    let list = List::new(items)
-                        .style(Style::default())
-                        .highlight_style(Style::default().fg(Color::LightCyan));
-
-                    frame.render_widget(list, chunks[1]);
+                    render_messages(frame, chunks[1], &tabs.contents[tabs.index], self.scroll);
                 }
             }
         } else {
-            // 无标签页，直接显示消息
-            let max_visible = inner_area.height as usize;
-
-            // 创建消息列表
-            let start_idx = if self.messages.len() > max_visible {
-                self.messages.len() - max_visible + self.scroll
-            } else {
-                0
-            };
-
-            let visible_messages = &self.messages[start_idx.min(self.messages.len())..];
-
-            let items: Vec<ListItem> = visible_messages
-                .iter()
-                .map(|m| {
-                    // 每条消息作为列表项
-                    ListItem::new(Line::from(vec![Span::raw(m)]))
-                })
-                .collect();
-
-            // 创建列表小部件
-            let list = List::new(items)
-                .style(Style::default())
-                .highlight_style(Style::default().fg(Color::LightCyan));
-
-            frame.render_widget(list, inner_area);
+            render_messages(frame, inner_area, &self.messages, self.scroll);
         }
     }
+}
+
+fn format_message(header: &str, content: &str) -> String {
+    format!("── {} ──\n  {}", header, content)
+}
+
+fn push_with_trim(list: &mut Vec<String>, msg: String) {
+    list.push(msg);
+    if list.len() > MAX_MESSAGES {
+        list.drain(0..list.len() - MAX_MESSAGES);
+    }
+}
+
+/// 渲染消息列表 — 只为可见区域构建 ListItem
+fn render_messages(frame: &mut Frame, area: Rect, messages: &[String], scroll: usize) {
+    if messages.is_empty() {
+        return;
+    }
+
+    let max_visible = area.height as usize;
+    if max_visible == 0 {
+        return;
+    }
+
+    // 计算每条消息的行数和总行数
+    let heights: Vec<usize> = messages.iter().map(|m| m.matches('\n').count() + 1).collect();
+    let total_lines: usize = heights.iter().sum();
+
+    // 确定 skip 的行数
+    let skip_lines = if total_lines > max_visible {
+        (total_lines - max_visible + scroll).min(total_lines - max_visible)
+    } else {
+        0
+    };
+
+    // 跳过前 skip_lines 行，找到起始消息索引和行偏移
+    let mut acc = 0;
+    let mut start_idx = 0;
+    let mut line_offset = 0;
+    for (i, &h) in heights.iter().enumerate() {
+        if acc + h > skip_lines {
+            start_idx = i;
+            line_offset = skip_lines - acc;
+            break;
+        }
+        acc += h;
+    }
+
+    // 构建可见区域的 ListItem
+    let mut visible_items = Vec::new();
+    let mut used_lines = 0;
+
+    for msg in &messages[start_idx..] {
+        if used_lines >= max_visible {
+            break;
+        }
+        let lines: Vec<Line> = msg
+            .split('\n')
+            .enumerate()
+            .filter(|(i, _)| start_idx == 0 || *i >= line_offset || used_lines > 0)
+            .map(|(_, l)| {
+                if l.starts_with("──") {
+                    Line::from(Span::styled(l, Style::default().fg(Color::DarkGray)))
+                } else {
+                    Line::from(l.to_string())
+                }
+            })
+            .collect();
+
+        used_lines += lines.len();
+        visible_items.push(ListItem::new(lines));
+    }
+
+    let list = List::new(visible_items);
+    frame.render_widget(list, area);
 }

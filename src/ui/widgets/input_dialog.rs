@@ -6,6 +6,19 @@ use ratatui::{
     Frame,
 };
 
+/// 数据发送格式
+pub enum FormatType {
+    String,
+    Hex,
+}
+
+/// 提交结果
+pub struct SubmitResult {
+    pub input: String,
+    pub format_hex: bool,
+    pub target_client: Option<String>,
+}
+
 /// 输入对话框组件
 pub struct InputDialog {
     /// 用户输入的文本
@@ -18,12 +31,6 @@ pub struct InputDialog {
     pub clients: Vec<String>,
 }
 
-/// 数据发送格式
-pub enum FormatType {
-    String,
-    Hex,
-}
-
 impl InputDialog {
     pub fn new() -> Self {
         Self {
@@ -34,7 +41,6 @@ impl InputDialog {
         }
     }
 
-    /// 添加客户端
     pub fn add_client(&mut self, client: String) {
         self.clients.push(client);
         if self.selected_client.is_none() && !self.clients.is_empty() {
@@ -42,7 +48,6 @@ impl InputDialog {
         }
     }
 
-    /// 切换格式类型
     pub fn toggle_format(&mut self) {
         self.format_type = match self.format_type {
             FormatType::String => FormatType::Hex,
@@ -50,18 +55,19 @@ impl InputDialog {
         };
     }
 
-    /// 提交输入并返回内容
-    pub fn submit(&self) -> Option<String> {
+    pub fn submit(&self) -> Option<SubmitResult> {
         if self.input.is_empty() {
             None
         } else {
-            Some(self.input.clone())
+            Some(SubmitResult {
+                input: self.input.clone(),
+                format_hex: matches!(self.format_type, FormatType::Hex),
+                target_client: self.selected_client.map(|i| self.clients[i].clone()),
+            })
         }
     }
 
-    /// 绘制对话框
     pub fn draw(&self, frame: &mut Frame) {
-        // 计算对话框的尺寸和位置
         let area = frame.area();
         let width = area.width.min(60);
         let height = 10;
@@ -69,31 +75,27 @@ impl InputDialog {
         let y = (area.height - height) / 2;
         let dialog_area = Rect::new(x, y, width, height);
 
-        // 创建清除层，防止对话框下方内容显示
         frame.render_widget(Clear, dialog_area);
 
-        // 创建对话框边框
         let block = Block::default()
             .title("Send Message")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::DarkGray));
 
-        // 创建垂直布局
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(1),  // 格式选择
-                Constraint::Length(1),  // 客户端选择
-                Constraint::Length(1),  // 间距
-                Constraint::Min(3),     // 输入区域
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(3),
             ])
             .split(dialog_area);
 
-        // 绘制对话框边框
         frame.render_widget(block, dialog_area);
 
-        // 绘制格式选择标签 — 将标签和 Tabs 并排放置
+        // 格式选择: 标签 + Tabs 并排
         let format_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(8), Constraint::Min(0)])
@@ -112,27 +114,32 @@ impl InputDialog {
         frame.render_widget(Paragraph::new("Format:"), format_chunks[0]);
         frame.render_widget(format_tabs, format_chunks[1]);
 
-        // 如果有客户端，绘制客户端选择 — 将标签和 Tabs 并排放置
+        // 客户端选择
         if !self.clients.is_empty() {
             let client_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(8), Constraint::Min(0)])
                 .split(chunks[1]);
 
-            let client_names: Vec<Line> = self.clients.iter().map(|c| Line::from(c.clone())).collect();
-            let client_tabs = Tabs::new(client_names)
-                .select(self.selected_client.unwrap_or(0))
-                .style(Style::default().fg(Color::White))
-                .highlight_style(Style::default().fg(Color::Yellow));
+            let client_tabs = Tabs::new(
+                self.clients.iter().map(|c| Line::from(c.clone())).collect::<Vec<_>>(),
+            )
+            .select(self.selected_client.unwrap_or(0))
+            .style(Style::default().fg(Color::White))
+            .highlight_style(Style::default().fg(Color::Yellow));
 
             frame.render_widget(Paragraph::new("Client:"), client_chunks[0]);
             frame.render_widget(client_tabs, client_chunks[1]);
         }
 
-        // 绘制输入区域
+        // 输入区域
+        let format_hint = match self.format_type {
+            FormatType::String => "",
+            FormatType::Hex => " (hex mode)",
+        };
         let input_block = Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default());
+            .title(format!("Input{}", format_hint))
+            .borders(Borders::ALL);
 
         let input_paragraph = Paragraph::new(self.input.as_str())
             .block(input_block)
@@ -140,7 +147,6 @@ impl InputDialog {
 
         frame.render_widget(input_paragraph, chunks[3]);
 
-        // 显示光标
         frame.set_cursor_position((
             chunks[3].x + 1 + self.input.len() as u16,
             chunks[3].y + 1,

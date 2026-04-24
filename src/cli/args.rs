@@ -116,12 +116,12 @@ pub struct ServerArgs {
 /// 客户端参数
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ClientArgs {
-    /// 本地地址 (如 127.0.0.1:9000)
-    /// 如果只提供端口号则绑定到 127.0.0.1
-    pub local: String,
-    
-    /// 远程服务器地址 (如 192.168.1.1:8000)
+    /// 远程服务器地址 (如 192.168.1.1:8000 或 8000)
     pub remote: String,
+
+    /// 本地绑定地址 (可选，如 127.0.0.1:9000)
+    /// 不指定则自动分配
+    pub local: Option<String>,
 }
 
 /// HTTP 客户端参数
@@ -193,35 +193,40 @@ pub fn parse_args() -> Args {
                 (ProtocolType::Tcp, AppMode::Server, parse_address(&args.address), None, None)
             }
             TcpCommands::Client(args) => {
-                (ProtocolType::Tcp, AppMode::Client, parse_address(&args.local), Some(parse_address(&args.remote)), None)
+                let local = args.local.as_deref().map(parse_address).unwrap_or_else(parse_unbound_addr);
+                (ProtocolType::Tcp, AppMode::Client, local, Some(parse_address(&args.remote)), None)
             }
         },
         Commands::TcpServer(args) => {
             (ProtocolType::Tcp, AppMode::Server, parse_address(&args.address), None, None)
         },
         Commands::TcpClient(args) => {
-            (ProtocolType::Tcp, AppMode::Client, parse_address(&args.local), Some(parse_address(&args.remote)), None)
+            let local = args.local.as_deref().map(parse_address).unwrap_or_else(parse_unbound_addr);
+            (ProtocolType::Tcp, AppMode::Client, local, Some(parse_address(&args.remote)), None)
         },
         Commands::Udp(cmd) => match cmd {
             UdpCommands::Server(args) => {
                 (ProtocolType::Udp, AppMode::Server, parse_address(&args.address), None, None)
             }
             UdpCommands::Client(args) => {
-                (ProtocolType::Udp, AppMode::Client, parse_address(&args.local), Some(parse_address(&args.remote)), None)
+                let local = args.local.as_deref().map(parse_address).unwrap_or_else(parse_unbound_addr);
+                (ProtocolType::Udp, AppMode::Client, local, Some(parse_address(&args.remote)), None)
             }
         },
         Commands::UdpServer(args) => {
             (ProtocolType::Udp, AppMode::Server, parse_address(&args.address), None, None)
         },
         Commands::UdpClient(args) => {
-            (ProtocolType::Udp, AppMode::Client, parse_address(&args.local), Some(parse_address(&args.remote)), None)
+            let local = args.local.as_deref().map(parse_address).unwrap_or_else(parse_unbound_addr);
+            (ProtocolType::Udp, AppMode::Client, local, Some(parse_address(&args.remote)), None)
         },
         Commands::WebSocket(cmd) => match cmd {
             WebSocketCommands::Server(args) => {
                 (ProtocolType::WebSocket, AppMode::Server, parse_address(&args.address), None, None)
             }
             WebSocketCommands::Client(args) => {
-                (ProtocolType::WebSocket, AppMode::Client, parse_address(&args.local), Some(parse_address(&args.remote)), None)
+                let local = args.local.as_deref().map(parse_address).unwrap_or_else(parse_unbound_addr);
+                (ProtocolType::WebSocket, AppMode::Client, local, Some(parse_address(&args.remote)), None)
             }
         },
         Commands::Http(cmd) => match cmd {
@@ -229,7 +234,7 @@ pub fn parse_args() -> Args {
                 (ProtocolType::Http, AppMode::Server, parse_address(&args.address), None, None)
             }
             HttpCommands::HttpClient(args) => {
-                (ProtocolType::Http, AppMode::Client, parse_dummy_addr(), None, Some(args.clone()))
+                (ProtocolType::Http, AppMode::Client, parse_unbound_addr(), None, Some(args.clone()))
             }
         },
         Commands::Http2(cmd) => match cmd {
@@ -237,7 +242,7 @@ pub fn parse_args() -> Args {
                 (ProtocolType::Http2, AppMode::Server, parse_address(&args.address), None, None)
             }
             HttpCommands::HttpClient(args) => {
-                (ProtocolType::Http2, AppMode::Client, parse_dummy_addr(), None, Some(args.clone()))
+                (ProtocolType::Http2, AppMode::Client, parse_unbound_addr(), None, Some(args.clone()))
             }
         },
         Commands::Http3(cmd) => match cmd {
@@ -245,7 +250,7 @@ pub fn parse_args() -> Args {
                 (ProtocolType::Http3, AppMode::Server, parse_address(&args.address), None, None)
             }
             HttpCommands::HttpClient(args) => {
-                (ProtocolType::Http3, AppMode::Client, parse_dummy_addr(), None, Some(args.clone()))
+                (ProtocolType::Http3, AppMode::Client, parse_unbound_addr(), None, Some(args.clone()))
             }
         },
     };
@@ -277,8 +282,8 @@ fn parse_address(addr_str: &str) -> SocketAddr {
     }
 }
 
-/// 为HTTP客户端模式生成一个虚拟地址，因为HTTP客户端不需要绑定到特定地址
-fn parse_dummy_addr() -> SocketAddr {
+/// 自动分配本地端口（bind to 0），用于客户端模式和 HTTP 客户端
+fn parse_unbound_addr() -> SocketAddr {
     "127.0.0.1:0".parse().unwrap()
 }
 
@@ -305,8 +310,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_dummy_addr() {
-        let addr = parse_dummy_addr();
+    fn test_parse_unbound_addr() {
+        let addr = parse_unbound_addr();
         assert!(addr.is_ipv4());
         assert_eq!(addr.port(), 0);
     }

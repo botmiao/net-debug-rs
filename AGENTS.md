@@ -28,11 +28,12 @@ cargo run -- <args>  # 运行
 ## 命令行用法
 
 ```bash
-netd tcp server 8000              # TCP 服务器
-netd tcp client 9000 127.0.0.1:8000  # TCP 客户端
-netd tcps 8000                    # TCP 服务器简写
-netd tcpc 9000 127.0.0.1:8000     # TCP 客户端简写
-netd --help                       # 帮助
+netd tcp server 8000                  # TCP 服务器
+netd tcp client 127.0.0.1:8000        # TCP 客户端（本地地址自动分配）
+netd tcp client 9000 127.0.0.1:8000   # TCP 客户端（指定本地地址）
+netd tcps 8000                        # TCP 服务器简写
+netd tcpc 127.0.0.1:8000              # TCP 客户端简写
+netd --help                           # 帮助
 ```
 
 ## 项目结构
@@ -93,4 +94,15 @@ src/
 ## 快捷键
 
 - `Ctrl+C` — 退出
-- `Ctrl+I` — 打开消息输入对话框
+- `I` — 打开消息输入对话框（HTTP 系列协议不可用）
+- `Tab` — 切换接收区 tab
+- `Shift+←/→` — 切换发送区 tab
+- 输入对话框内 `Tab` — 切换 String/Hex 格式
+- 终端 `Ctrl+Shift+V` — 粘贴（终端原生支持）
+
+## UI 设计
+
+- 消息显示为两行：第一行 `── 时间戳 | 连接地址 ──`（灰色分隔线），第二行为实际内容
+- 发送区和接收区都有 per-client tab，tab 标题为客户端 IP:Port
+- HTTP/HTTP2/HTTP3 协议不响应 I 键（短连接模式）
+- 输入对话框支持选择目标客户端和数据格式（String/Hex）
