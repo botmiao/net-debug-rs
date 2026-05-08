@@ -153,10 +153,9 @@ impl App {
                             self.send_view.close_connection_by_title(&id);
                         }
                         common::MessageType::Binary(data) => {
-                            let hex_str = crate::utils::data_format::bytes_to_hex(&data);
-                            self.add_received_message(
+                            self.add_received_bytes(
                                 self.format_header(conn_addr.as_deref()),
-                                format!("[Binary] {}", hex_str),
+                                data.to_vec(),
                                 conn_id.as_deref(),
                             );
                         }
@@ -226,6 +225,36 @@ impl App {
                 self.send_view.next_tab();
             }
 
+            // 接收区滚动
+            (KeyCode::Up, KeyModifiers::NONE) => {
+                self.receive_view.scroll_up(1);
+            }
+            (KeyCode::Down, KeyModifiers::NONE) => {
+                self.receive_view.scroll_down(1);
+            }
+            (KeyCode::PageUp, KeyModifiers::NONE) => {
+                self.receive_view.scroll_up(10);
+            }
+            (KeyCode::PageDown, KeyModifiers::NONE) => {
+                self.receive_view.scroll_down(10);
+            }
+            (KeyCode::End, KeyModifiers::NONE) => {
+                self.receive_view.scroll_to_bottom();
+            }
+
+            // 发送区滚动
+            (KeyCode::Up, KeyModifiers::SHIFT) => {
+                self.send_view.scroll_up(1);
+            }
+            (KeyCode::Down, KeyModifiers::SHIFT) => {
+                self.send_view.scroll_down(1);
+            }
+
+            // 接收区显示格式切换
+            (KeyCode::Char('h'), _) | (KeyCode::Char('H'), _) => {
+                self.receive_view.toggle_display_mode();
+            }
+
             _ => {}
         }
         Ok(())
@@ -284,8 +313,18 @@ impl App {
         self.stats.last_activity = Instant::now();
 
         let header = self.format_header(target_client.as_deref());
-        self.send_view
-            .add_message(header, input, target_client.as_deref());
+        if is_hex {
+            if let Ok(bytes) = crate::utils::data_format::hex_to_bytes(&input) {
+                self.send_view
+                    .add_bytes_message(header, bytes, target_client.as_deref());
+            } else {
+                self.send_view
+                    .add_message(header, input, target_client.as_deref());
+            }
+        } else {
+            self.send_view
+                .add_message(header, input, target_client.as_deref());
+        }
 
         if let Some(tx) = self.protocol_handler.get_ui_to_server_sender() {
             let connection_info = target_client.as_ref().and_then(|connection_id| {
@@ -313,6 +352,12 @@ impl App {
         self.stats.received_bytes += content.len();
         self.stats.last_activity = Instant::now();
         self.receive_view.add_message(header, content, tab);
+    }
+
+    pub fn add_received_bytes(&mut self, header: String, content: Vec<u8>, tab: Option<&str>) {
+        self.stats.received_bytes += content.len();
+        self.stats.last_activity = Instant::now();
+        self.receive_view.add_bytes_message(header, content, tab);
     }
 
     pub fn set_connected(&mut self, connected: bool) {

@@ -23,9 +23,10 @@ impl StatusBar {
     /// 绘制顶部状态栏
     pub fn draw_top_bar(&self, frame: &mut Frame, area: Rect, app: &App) {
         let status_text = format!(
-            " Sent: {} bytes | Received: {} bytes | Status: {} ",
+            " Sent: {} bytes | Received: {} bytes | Recv: {} | Status: {} ",
             app.stats.sent_bytes,
             app.stats.received_bytes,
+            app.receive_view.display_mode().label(),
             if app.stats.connected {
                 "Connected"
             } else {
@@ -43,7 +44,7 @@ impl StatusBar {
 
     /// 绘制底部状态栏 (快捷键提示)
     pub fn draw_bottom_bar(&self, frame: &mut Frame, area: Rect) {
-        let help_text = " Ctrl+C: Quit | I: Input | Tab: Switch Recv | Shift+←/→: Switch Send ";
+        let help_text = " Ctrl+C: Quit | I: Input | H: Recv String/Hex | ↑/↓ PgUp/PgDn: Scroll Recv | Shift+↑/↓: Scroll Send ";
 
         let help_widget = Paragraph::new(Span::styled(
             help_text,

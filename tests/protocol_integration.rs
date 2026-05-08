@@ -233,3 +233,35 @@ async fn test_tcp_client_ui_sender_sends_hex() {
         .unwrap();
     assert_eq!(&buf[..n], "中".as_bytes());
 }
+
+/// 测试 TCP 接收非 UTF-8 数据时保留原始 bytes，避免提前解码成乱码
+#[tokio::test]
+async fn test_tcp_server_receives_invalid_utf8_as_binary() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let (server_tx, mut server_rx) = tokio::sync::mpsc::channel(100);
+    let mut server = create_protocol_handler("tcp", true, Some(server_tx), server_addr, None)
+        .await
+        .expect("Failed to create server");
+
+    let mut stream = TcpStream::connect(server_addr)
+        .await
+        .expect("Failed to connect to server");
+
+    stream.write_all(&[0xFF, 0x00]).await.unwrap();
+
+    let _ = timeout(Duration::from_secs(2), server_rx.recv())
+        .await
+        .expect("Timeout waiting for connection")
+        .expect("Channel closed");
+
+    let msg = timeout(Duration::from_secs(2), server_rx.recv())
+        .await
+        .expect("Timeout waiting for data")
+        .expect("Channel closed");
+    assert!(matches!(msg.content, MessageType::Binary(ref data) if data.as_ref() == [0xFF, 0x00]));
+
+    server.stop().await.unwrap();
+}

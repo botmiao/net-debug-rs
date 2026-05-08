@@ -7,19 +7,19 @@ use ratatui::{
 };
 
 /// Tab页管理状态
-pub struct TabsState {
+pub struct TabsState<T = String> {
     /// 所有Tab标题
     pub titles: Vec<String>,
     /// 当前索引
     pub index: usize,
     /// Tab所包含的内容
-    pub contents: Vec<Vec<String>>,
+    pub contents: Vec<Vec<T>>,
 }
 
-impl TabsState {
+impl<T> TabsState<T> {
     pub fn new(titles: Vec<String>) -> Self {
         let num_tabs = titles.len();
-        let contents = vec![Vec::new(); num_tabs];
+        let contents = (0..num_tabs).map(|_| Vec::new()).collect();
 
         Self {
             titles,
@@ -56,13 +56,6 @@ impl TabsState {
         }
     }
 
-    /// 向指定Tab添加消息
-    pub fn add_message(&mut self, tab_index: usize, message: String) {
-        if tab_index < self.contents.len() {
-            self.contents[tab_index].push(message);
-        }
-    }
-
     /// 切换下一个Tab
     pub fn next(&mut self) {
         if !self.titles.is_empty() {
@@ -78,6 +71,15 @@ impl TabsState {
             } else {
                 self.index = self.titles.len() - 1;
             }
+        }
+    }
+}
+
+impl TabsState<String> {
+    /// 向指定Tab添加消息
+    pub fn add_message(&mut self, tab_index: usize, message: String) {
+        if tab_index < self.contents.len() {
+            self.contents[tab_index].push(message);
         }
     }
 
@@ -97,7 +99,11 @@ impl TabsState {
             .split(area);
 
         // 创建Tab栏
-        let tab_titles: Vec<Line> = self.titles.iter().map(|t| Line::from(vec![Span::raw(t)])).collect();
+        let tab_titles: Vec<Line> = self
+            .titles
+            .iter()
+            .map(|t| Line::from(vec![Span::raw(t)]))
+            .collect();
 
         let tabs = Tabs::new(tab_titles)
             .block(Block::default().borders(Borders::ALL))
@@ -121,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_new_tabs() {
-        let tabs = TabsState::new(vec!["Tab1".to_string(), "Tab2".to_string()]);
+        let tabs: TabsState = TabsState::new(vec!["Tab1".to_string(), "Tab2".to_string()]);
         assert_eq!(tabs.titles.len(), 2);
         assert_eq!(tabs.index, 0);
         assert_eq!(tabs.contents.len(), 2);
@@ -129,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_add_tab() {
-        let mut tabs = TabsState::new(vec!["Tab1".to_string()]);
+        let mut tabs: TabsState = TabsState::new(vec!["Tab1".to_string()]);
         tabs.add_tab("Tab2".to_string());
         assert_eq!(tabs.titles.len(), 2);
         assert_eq!(tabs.contents.len(), 2);
@@ -138,7 +144,8 @@ mod tests {
 
     #[test]
     fn test_remove_tab() {
-        let mut tabs = TabsState::new(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        let mut tabs: TabsState =
+            TabsState::new(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
         tabs.remove_tab(1);
         assert_eq!(tabs.titles, vec!["A", "C"]);
         assert!(tabs.index <= 1);
@@ -146,14 +153,15 @@ mod tests {
 
     #[test]
     fn test_remove_tab_by_title() {
-        let mut tabs = TabsState::new(vec!["A".to_string(), "B".to_string()]);
+        let mut tabs: TabsState = TabsState::new(vec!["A".to_string(), "B".to_string()]);
         tabs.remove_tab_by_title("A");
         assert_eq!(tabs.titles, vec!["B"]);
     }
 
     #[test]
     fn test_next_previous() {
-        let mut tabs = TabsState::new(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        let mut tabs: TabsState =
+            TabsState::new(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
         assert_eq!(tabs.index, 0);
         tabs.next();
         assert_eq!(tabs.index, 1);
@@ -167,14 +175,14 @@ mod tests {
 
     #[test]
     fn test_add_message() {
-        let mut tabs = TabsState::new(vec!["A".to_string()]);
+        let mut tabs: TabsState = TabsState::new(vec!["A".to_string()]);
         tabs.add_message(0, "hello".to_string());
         assert_eq!(tabs.contents[0], vec!["hello"]);
     }
 
     #[test]
     fn test_remove_last_tab_resets_index() {
-        let mut tabs = TabsState::new(vec!["Only".to_string()]);
+        let mut tabs: TabsState = TabsState::new(vec!["Only".to_string()]);
         tabs.remove_tab(0);
         assert!(tabs.titles.is_empty());
         assert_eq!(tabs.index, 0);

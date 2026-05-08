@@ -55,14 +55,14 @@ fn message_to_bytes(message: MessageType) -> Option<Bytes> {
     }
 }
 
-fn decode_utf8_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> Option<String> {
+fn decode_utf8_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> Option<MessageType> {
     pending.extend_from_slice(chunk);
 
     match std::str::from_utf8(pending) {
         Ok(text) => {
             let text = text.to_string();
             pending.clear();
-            Some(text)
+            Some(MessageType::Text(text))
         }
         Err(err) if err.error_len().is_none() => {
             let valid_up_to = err.valid_up_to();
@@ -72,12 +72,12 @@ fn decode_utf8_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> Option<String> {
 
             let text = String::from_utf8_lossy(&pending[..valid_up_to]).to_string();
             pending.drain(..valid_up_to);
-            Some(text)
+            Some(MessageType::Text(text))
         }
         Err(_) => {
-            let text = String::from_utf8_lossy(pending).to_string();
+            let bytes = Bytes::from(std::mem::take(pending));
             pending.clear();
-            Some(text)
+            Some(MessageType::Binary(bytes))
         }
     }
 }
@@ -240,7 +240,7 @@ impl ProtocolHandler for TcpServerHandler {
                                                 if let Some(ref server_to_ui_sender) = server_to_ui_tx_for_read {
                                                     let _ = server_to_ui_sender.send(Message {
                                                         direction: MessageDirection::Received,
-                                                        content: MessageType::Text(message_content.clone()),
+                                                        content: message_content,
                                                         timestamp: chrono::Local::now(),
                                                         connection_info: Some(ConnectionInfo {
                                                             remote_addr: addr,
@@ -464,7 +464,7 @@ impl ProtocolHandler for TcpClientHandler {
                         if let Some(ref tx) = server_to_ui_tx {
                             let _ = tx
                                 .send(Message {
-                                    content: MessageType::Text(message_content),
+                                    content: message_content,
                                     direction: MessageDirection::Received,
                                     timestamp: chrono::Local::now(),
                                     connection_info: Some(ConnectionInfo {
@@ -578,11 +578,22 @@ mod tests {
     fn decode_utf8_chunk_preserves_split_multibyte_character() {
         let mut pending = Vec::new();
 
-        assert_eq!(decode_utf8_chunk(&mut pending, &[0xE4, 0xB8]), None);
-        assert_eq!(
+        assert!(decode_utf8_chunk(&mut pending, &[0xE4, 0xB8]).is_none());
+        assert!(matches!(
             decode_utf8_chunk(&mut pending, &[0xAD]),
-            Some("中".to_string())
-        );
+            Some(MessageType::Text(ref text)) if text == "中"
+        ));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn decode_utf8_chunk_preserves_invalid_utf8_as_binary() {
+        let mut pending = Vec::new();
+
+        assert!(matches!(
+            decode_utf8_chunk(&mut pending, &[0xFF, 0x00]),
+            Some(MessageType::Binary(ref bytes)) if bytes.as_ref() == [0xFF, 0x00]
+        ));
         assert!(pending.is_empty());
     }
 }
